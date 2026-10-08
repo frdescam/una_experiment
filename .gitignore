@@ -1,0 +1,11 @@
+# Fetched by tools/bootstrap.sh
+.deps/
+
+# Build trees
+build-tests/
+apps/RideLock/Software/Apps/RideLock-CMake/build/
+apps/RideLock/Software/Apps/LVGL-GUI/simulator/build/
+apps/RideLock/Software/Apps/LVGL-GUI/simulator/build-*/
+
+# The PC simulator's mock file system
+apps/RideLock/Software/Output/
