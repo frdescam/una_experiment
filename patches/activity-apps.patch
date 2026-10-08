@@ -1,0 +1,799 @@
+diff --git a/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainPresenter.hpp b/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainPresenter.hpp
+index 8b570103..c886dacf 100644
+--- a/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainPresenter.hpp
++++ b/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainPresenter.hpp
+@@ -32,6 +32,7 @@ public:
+     virtual void onAccessoryStatus(uint8_t state, const char* name) override;  // WP-S4
+ 
+     void startTrack();
++    void beginHoldToStart();
+     void exitApp();
+ 
+ private:
+diff --git a/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainView.hpp b/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainView.hpp
+index 6d017ed2..d441c933 100644
+--- a/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainView.hpp
++++ b/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainView.hpp
+@@ -26,6 +26,7 @@ protected:
+     using Menu = App::MenuNav::Root;
+ 
+     bool mGpsFix = false;
++    uint8_t mOthersDown = 0;   ///< L1, L2, R2 held (one bit each): a squeeze is not a start
+     SDK::GUI::SensorStatusRow mSensorRow;
+ 
+     MenuItemConfig mItems[Menu::ID_COUNT] {};
+diff --git a/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/include/gui/model/Model.hpp b/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/include/gui/model/Model.hpp
+index 85e10ba8..d0d1c767 100644
+--- a/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/include/gui/model/Model.hpp
++++ b/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/include/gui/model/Model.hpp
+@@ -111,7 +111,7 @@ public:
+     void discardTrack();
+ 
+     // Hold-to-confirm: which action the shared TrackHoldConfirmation screen performs.
+-    enum class HoldConfirmMode { Finish, Discard };
++    enum class HoldConfirmMode { Finish, Discard, Start };
+     void setHoldConfirmMode(HoldConfirmMode mode);
+     HoldConfirmMode getHoldConfirmMode() const;
+     bool isTrackSummaryAvailable() const;
+diff --git a/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationPresenter.hpp b/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationPresenter.hpp
+index 873ac446..b3b0bbad 100644
+--- a/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationPresenter.hpp
++++ b/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationPresenter.hpp
+@@ -30,7 +30,17 @@ public:
+     /** Which action the hold screen should confirm (set by the action menu). */
+     Model::HoldConfirmMode getHoldConfirmMode() const { return model->getHoldConfirmMode(); }
+ 
+-    virtual void onIdleTimeout() override { model->application().gotoTrackActionScreenNoTransition(); }
++    /** Start mode: the hold completed, start the activity. */
++    void startTrack() { model->trackStart(); }
++
++    virtual void onIdleTimeout() override
++    {
++        if (model->getHoldConfirmMode() == Model::HoldConfirmMode::Start) {
++            model->application().gotoMainScreenNoTransition();
++        } else {
++            model->application().gotoTrackActionScreenNoTransition();
++        }
++    }
+ 
+ private:
+     TrackHoldConfirmationPresenter();
+diff --git a/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationView.hpp b/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationView.hpp
+index f53f0f59..e4ac9c9f 100644
+--- a/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationView.hpp
++++ b/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationView.hpp
+@@ -5,7 +5,10 @@
+ #include <gui/trackholdconfirmation_screen/TrackHoldConfirmationPresenter.hpp>
+ 
+ /**
+- * @brief Shared hold-to-confirm screen for ending an activity.
++ * @brief Shared hold-to-confirm screen for starting and ending an activity.
++ *
++ * Start: holding R1 on the main menu's START comes here, and completing the
++ * hold starts the activity; releasing early goes back to the menu.
+  *
+  * The hold begins on the action menu: pressing-and-holding R1 on Save/Discard
+  * navigates here and the countdown starts immediately, running while R1 stays
+diff --git a/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainPresenter.cpp b/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainPresenter.cpp
+index 3f957c30..62be82af 100644
+--- a/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainPresenter.cpp
++++ b/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainPresenter.cpp
+@@ -39,6 +39,11 @@ void MainPresenter::onAccessoryStatus(uint8_t state, const char* name)
+     view.setAccessoryStatus(state, name);
+ }
+ 
++void MainPresenter::beginHoldToStart()
++{
++    model->setHoldConfirmMode(Model::HoldConfirmMode::Start);
++}
++
+ void MainPresenter::startTrack()
+ {
+     model->trackStart();
+diff --git a/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainView.cpp b/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainView.cpp
+index 611673fc..60b22eb1 100644
+--- a/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainView.cpp
++++ b/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainView.cpp
+@@ -99,6 +99,16 @@ void MainView::onAnimationMiddle(int16_t index)
+ 
+ void MainView::handleKeyEvent(uint8_t key)
+ {
++    switch (key) {
++        case SDK::GUI::Button::L1_PRESS:   mOthersDown |= 1u;  break;
++        case SDK::GUI::Button::L2_PRESS:   mOthersDown |= 2u;  break;
++        case SDK::GUI::Button::R2_PRESS:   mOthersDown |= 4u;  break;
++        case SDK::GUI::Button::L1_RELEASE: mOthersDown &= ~1u; break;
++        case SDK::GUI::Button::L2_RELEASE: mOthersDown &= ~2u; break;
++        case SDK::GUI::Button::R2_RELEASE: mOthersDown &= ~4u; break;
++        default: break;
++    }
++
+     if (key == SDK::GUI::Button::L1) {
+         menuLayout.selectPrev();
+     }
+@@ -107,6 +117,16 @@ void MainView::handleKeyEvent(uint8_t key)
+         menuLayout.selectNext();
+     }
+ 
++    // START is held, not clicked, as finishing already is: a click is what
++    // a sleeve or a pocket produces. The hold must be R1 alone, so squeezing
++    // the case does not count either. The hold screen starts the activity.
++    if (key == SDK::GUI::Button::R1_PRESS && mOthersDown == 0 &&
++        menuLayout.getSelectedItem() == Menu::ID_START) {
++        presenter->beginHoldToStart();
++        application().gotoTrackHoldConfirmationScreenNoTransition();
++        return;
++    }
++
+     if (key == SDK::GUI::Button::R1) {
+         onConfirm();
+     }
+@@ -125,12 +145,7 @@ void MainView::onConfirm()
+ 
+     switch (idx) {
+     case Menu::ID_START:
+-        if (mGpsFix) {
+-            presenter->startTrack();
+-            application().gotoTrackScreenNoTransition();
+-        } else {
+-            application().gotoTrackStartConfirmationScreenNoTransition();
+-        }
++        // Started by holding R1 (handleKeyEvent), never by a click.
+         break;
+ 
+     case Menu::ID_SETTINGS:
+diff --git a/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/src/trackholdconfirmation_screen/TrackHoldConfirmationView.cpp b/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/src/trackholdconfirmation_screen/TrackHoldConfirmationView.cpp
+index e2963e7a..84c2b5eb 100644
+--- a/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/src/trackholdconfirmation_screen/TrackHoldConfirmationView.cpp
++++ b/Examples/Apps/Cycling/Software/Apps/TouchGFX-GUI/gui/src/trackholdconfirmation_screen/TrackHoldConfirmationView.cpp
+@@ -18,11 +18,25 @@ void TrackHoldConfirmationView::setupScreen()
+     TrackHoldConfirmationViewBase::setupScreen();
+ 
+     mMode = presenter->getHoldConfirmMode();
+-    const bool finish = (mMode == Model::HoldConfirmMode::Finish);
++    const bool start  = (mMode == Model::HoldConfirmMode::Start);
++    const bool finish = (mMode == Model::HoldConfirmMode::Finish) || start;  // both green
+ 
+-    // Label ("Hold to Finish" / "Hold to Discard").
+-    questionText.setTypedText(touchgfx::TypedText(finish ? T_TEXT_HOLD_TO_FINISH
+-                                                         : T_TEXT_HOLD_TO_DISCARD));
++    // Label ("Hold to Finish" / "Hold to Discard" / "Start").
++    if (start) {
++        // The text database has no "Hold to Start": the menu's "Start",
++        // centred in the label's box, with the countdown below it.
++        const int16_t boxX = questionText.getX();
++        const int16_t boxY = questionText.getY();
++        const int16_t boxW = questionText.getWidth();
++        const int16_t boxH = questionText.getHeight();
++        questionText.setTypedText(touchgfx::TypedText(T_TEXT_START));
++        questionText.resizeToCurrentText();
++        questionText.setXY(boxX + (boxW - questionText.getWidth()) / 2,
++                           boxY + (boxH - questionText.getHeight()) / 2);
++    } else {
++        questionText.setTypedText(touchgfx::TypedText(finish ? T_TEXT_HOLD_TO_FINISH
++                                                             : T_TEXT_HOLD_TO_DISCARD));
++    }
+     questionText.invalidate();
+ 
+     // R1 = confirm (green finish / red discard). No R2/back hint: releasing R1 cancels.
+@@ -61,8 +75,17 @@ void TrackHoldConfirmationView::tearDownScreen()
+ 
+ void TrackHoldConfirmationView::handleKeyEvent(uint8_t key)
+ {
+-    // Releasing R1 before the countdown completes cancels and returns to the menu.
+-    if (key == SDK::GUI::Button::R1_RELEASE && !mFired) {
++    // Releasing R1 before the countdown completes cancels and returns to the
++    // menu it came from. A start must be R1 alone: another button going down
++    // (the case squeezed) cancels it too.
++    const bool other = key == SDK::GUI::Button::L1_PRESS ||
++                       key == SDK::GUI::Button::L2_PRESS ||
++                       key == SDK::GUI::Button::R2_PRESS;
++    if (!mFired && mMode == Model::HoldConfirmMode::Start &&
++        (key == SDK::GUI::Button::R1_RELEASE || other)) {
++        timerRing.stop();
++        application().gotoMainScreenNoTransition();
++    } else if (key == SDK::GUI::Button::R1_RELEASE && !mFired) {
+         timerRing.stop();
+         application().gotoTrackActionScreenNoTransition();
+     }
+@@ -86,7 +109,10 @@ void TrackHoldConfirmationView::onTimerComplete(int32_t /*value*/)
+ {
+     if (mFired) return;
+     mFired = true;
+-    if (mMode == Model::HoldConfirmMode::Finish) {
++    if (mMode == Model::HoldConfirmMode::Start) {
++        presenter->startTrack();
++        application().gotoTrackScreenNoTransition();
++    } else if (mMode == Model::HoldConfirmMode::Finish) {
+         application().gotoTrackSavedScreenNoTransition();
+     } else {
+         application().gotoTrackDiscardedScreenNoTransition();
+diff --git a/Examples/Apps/Cycling/Software/Libs/Header/Service.hpp b/Examples/Apps/Cycling/Software/Libs/Header/Service.hpp
+index e3147638..a65917bd 100644
+--- a/Examples/Apps/Cycling/Software/Libs/Header/Service.hpp
++++ b/Examples/Apps/Cycling/Software/Libs/Header/Service.hpp
+@@ -33,6 +33,12 @@ private:
+     static constexpr uint32_t skBacklightTimeout     = 5000;
+     static constexpr uint32_t skSamplePeriod         = 1000;
+     static constexpr uint32_t skSampleLatency        = 1000;
++
++    /// Opening the app turns the GNSS on so a fix is ready for START. If no
++    /// activity starts within this long (the app was opened by a sleeve or a
++    /// pocket), the service closes the app rather than search until the
++    /// battery is flat.
++    static constexpr uint32_t skPreActivityBudgetMs  = 5 * 60 * 1000;
+     static constexpr float    skMapDistanceThreshold = 10.0f; // meters
+     static constexpr uint32_t skMapMaxPoints         = 70;
+     static constexpr uint32_t skBatteryLogPeriodMs   = 5 * 60 * 1000;
+@@ -256,6 +262,7 @@ private:
+     Track::State mTrackState          = Track::State::INACTIVE;
+     bool         mPreviousGpsFixState = false;
+     bool         mGpsInitialConnectFailed = false;  ///< GPS_LOCATION subscribe lost the startup ack race; the retry logs the recovery.
++    uint32_t     mPreActivitySinceMs = 0;          ///< when the pre-activity screen opened (GUI start)
+     bool         mGpsWanted = false;                 ///< GPS_LOCATION should stay connected (pre-activity + active track); cleared in disconnect() so the retry never re-wakes the GNSS post-activity.
+     bool         mSessionNotEmpty     = false;
+     bool         mLapNotEmpty         = false;
+diff --git a/Examples/Apps/Cycling/Software/Libs/Sources/Service.cpp b/Examples/Apps/Cycling/Software/Libs/Sources/Service.cpp
+index 70518d39..21579bf5 100644
+--- a/Examples/Apps/Cycling/Software/Libs/Sources/Service.cpp
++++ b/Examples/Apps/Cycling/Software/Libs/Sources/Service.cpp
+@@ -216,6 +216,18 @@ void Service::run()
+                     }
+                 }
+ 
++                // Nothing started within the budget: close the app, which
++                // releases the GNSS. The pre-activity screens hold nothing
++                // unsaved (settings are saved as they change).
++                if (mTrackState == Track::State::INACTIVE && mGpsWanted &&
++                    mKernel.sys.getTimeMs() - mPreActivitySinceMs >= skPreActivityBudgetMs) {
++                    LOG_INFO("No activity started within %u s of opening: closing\n",
++                             static_cast<unsigned>(skPreActivityBudgetMs / 1000u));
++                    requestAccessoryRelease();
++                    disconnect();
++                    return;   // ends the app, GUI included
++                }
++
+                 // Send to GUI real "local time" to display
+                 std::tm tmNow = mTimeTracker.getLocalTime(std::time(nullptr));
+                 SDK::send_msg<CustomMessage::Time>(mKernel, tmNow);
+@@ -380,6 +392,7 @@ void Service::handleSensorsData(uint16_t handle, SDK::Sensor::DataBatch& data)
+ void Service::onStartGUI()
+ {
+     mGuiStarted = true;
++    mPreActivitySinceMs = mKernel.sys.getTimeMs();
+ 
+     setCapabilities();
+     requestAccessoryPrepare();   // pre-warm external HR while on the pre-activity screen
+diff --git a/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainPresenter.hpp b/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainPresenter.hpp
+index 8b570103..c886dacf 100644
+--- a/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainPresenter.hpp
++++ b/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainPresenter.hpp
+@@ -32,6 +32,7 @@ public:
+     virtual void onAccessoryStatus(uint8_t state, const char* name) override;  // WP-S4
+ 
+     void startTrack();
++    void beginHoldToStart();
+     void exitApp();
+ 
+ private:
+diff --git a/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainView.hpp b/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainView.hpp
+index 6d017ed2..d441c933 100644
+--- a/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainView.hpp
++++ b/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainView.hpp
+@@ -26,6 +26,7 @@ protected:
+     using Menu = App::MenuNav::Root;
+ 
+     bool mGpsFix = false;
++    uint8_t mOthersDown = 0;   ///< L1, L2, R2 held (one bit each): a squeeze is not a start
+     SDK::GUI::SensorStatusRow mSensorRow;
+ 
+     MenuItemConfig mItems[Menu::ID_COUNT] {};
+diff --git a/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/include/gui/model/Model.hpp b/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/include/gui/model/Model.hpp
+index 3636b027..b097006e 100644
+--- a/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/include/gui/model/Model.hpp
++++ b/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/include/gui/model/Model.hpp
+@@ -104,7 +104,7 @@ public:
+     void discardTrack();
+ 
+     // Hold-to-confirm: which action the shared TrackHoldConfirmation screen performs.
+-    enum class HoldConfirmMode { Finish, Discard };
++    enum class HoldConfirmMode { Finish, Discard, Start };
+     void setHoldConfirmMode(HoldConfirmMode mode);
+     HoldConfirmMode getHoldConfirmMode() const;
+ 
+diff --git a/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationPresenter.hpp b/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationPresenter.hpp
+index 873ac446..b3b0bbad 100644
+--- a/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationPresenter.hpp
++++ b/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationPresenter.hpp
+@@ -30,7 +30,17 @@ public:
+     /** Which action the hold screen should confirm (set by the action menu). */
+     Model::HoldConfirmMode getHoldConfirmMode() const { return model->getHoldConfirmMode(); }
+ 
+-    virtual void onIdleTimeout() override { model->application().gotoTrackActionScreenNoTransition(); }
++    /** Start mode: the hold completed, start the activity. */
++    void startTrack() { model->trackStart(); }
++
++    virtual void onIdleTimeout() override
++    {
++        if (model->getHoldConfirmMode() == Model::HoldConfirmMode::Start) {
++            model->application().gotoMainScreenNoTransition();
++        } else {
++            model->application().gotoTrackActionScreenNoTransition();
++        }
++    }
+ 
+ private:
+     TrackHoldConfirmationPresenter();
+diff --git a/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationView.hpp b/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationView.hpp
+index f53f0f59..e4ac9c9f 100644
+--- a/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationView.hpp
++++ b/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationView.hpp
+@@ -5,7 +5,10 @@
+ #include <gui/trackholdconfirmation_screen/TrackHoldConfirmationPresenter.hpp>
+ 
+ /**
+- * @brief Shared hold-to-confirm screen for ending an activity.
++ * @brief Shared hold-to-confirm screen for starting and ending an activity.
++ *
++ * Start: holding R1 on the main menu's START comes here, and completing the
++ * hold starts the activity; releasing early goes back to the menu.
+  *
+  * The hold begins on the action menu: pressing-and-holding R1 on Save/Discard
+  * navigates here and the countdown starts immediately, running while R1 stays
+diff --git a/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainPresenter.cpp b/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainPresenter.cpp
+index 3f957c30..62be82af 100644
+--- a/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainPresenter.cpp
++++ b/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainPresenter.cpp
+@@ -39,6 +39,11 @@ void MainPresenter::onAccessoryStatus(uint8_t state, const char* name)
+     view.setAccessoryStatus(state, name);
+ }
+ 
++void MainPresenter::beginHoldToStart()
++{
++    model->setHoldConfirmMode(Model::HoldConfirmMode::Start);
++}
++
+ void MainPresenter::startTrack()
+ {
+     model->trackStart();
+diff --git a/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainView.cpp b/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainView.cpp
+index e21a5ccf..e31bd80f 100644
+--- a/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainView.cpp
++++ b/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainView.cpp
+@@ -103,6 +103,16 @@ void MainView::onAnimationMiddle(int16_t index)
+ 
+ void MainView::handleKeyEvent(uint8_t key)
+ {
++    switch (key) {
++        case SDK::GUI::Button::L1_PRESS:   mOthersDown |= 1u;  break;
++        case SDK::GUI::Button::L2_PRESS:   mOthersDown |= 2u;  break;
++        case SDK::GUI::Button::R2_PRESS:   mOthersDown |= 4u;  break;
++        case SDK::GUI::Button::L1_RELEASE: mOthersDown &= ~1u; break;
++        case SDK::GUI::Button::L2_RELEASE: mOthersDown &= ~2u; break;
++        case SDK::GUI::Button::R2_RELEASE: mOthersDown &= ~4u; break;
++        default: break;
++    }
++
+     if (key == SDK::GUI::Button::L1) {
+         menuLayout.selectPrev();
+     }
+@@ -111,6 +121,16 @@ void MainView::handleKeyEvent(uint8_t key)
+         menuLayout.selectNext();
+     }
+ 
++    // START is held, not clicked, as finishing already is: a click is what
++    // a sleeve or a pocket produces. The hold must be R1 alone, so squeezing
++    // the case does not count either. The hold screen starts the activity.
++    if (key == SDK::GUI::Button::R1_PRESS && mOthersDown == 0 &&
++        menuLayout.getSelectedItem() == Menu::ID_START) {
++        presenter->beginHoldToStart();
++        application().gotoTrackHoldConfirmationScreenNoTransition();
++        return;
++    }
++
+     if (key == SDK::GUI::Button::R1) {
+         onConfirm();
+     }
+@@ -129,12 +149,7 @@ void MainView::onConfirm()
+ 
+     switch (idx) {
+     case Menu::ID_START:
+-        if (mGpsFix) {
+-            presenter->startTrack();
+-            application().gotoTrackScreenNoTransition();
+-        } else {
+-            application().gotoTrackStartConfirmationScreenNoTransition();
+-        }
++        // Started by holding R1 (handleKeyEvent), never by a click.
+         break;
+ 
+     case Menu::ID_SETTINGS:
+diff --git a/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/src/trackholdconfirmation_screen/TrackHoldConfirmationView.cpp b/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/src/trackholdconfirmation_screen/TrackHoldConfirmationView.cpp
+index e2963e7a..84c2b5eb 100644
+--- a/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/src/trackholdconfirmation_screen/TrackHoldConfirmationView.cpp
++++ b/Examples/Apps/Hiking/Software/Apps/TouchGFX-GUI/gui/src/trackholdconfirmation_screen/TrackHoldConfirmationView.cpp
+@@ -18,11 +18,25 @@ void TrackHoldConfirmationView::setupScreen()
+     TrackHoldConfirmationViewBase::setupScreen();
+ 
+     mMode = presenter->getHoldConfirmMode();
+-    const bool finish = (mMode == Model::HoldConfirmMode::Finish);
++    const bool start  = (mMode == Model::HoldConfirmMode::Start);
++    const bool finish = (mMode == Model::HoldConfirmMode::Finish) || start;  // both green
+ 
+-    // Label ("Hold to Finish" / "Hold to Discard").
+-    questionText.setTypedText(touchgfx::TypedText(finish ? T_TEXT_HOLD_TO_FINISH
+-                                                         : T_TEXT_HOLD_TO_DISCARD));
++    // Label ("Hold to Finish" / "Hold to Discard" / "Start").
++    if (start) {
++        // The text database has no "Hold to Start": the menu's "Start",
++        // centred in the label's box, with the countdown below it.
++        const int16_t boxX = questionText.getX();
++        const int16_t boxY = questionText.getY();
++        const int16_t boxW = questionText.getWidth();
++        const int16_t boxH = questionText.getHeight();
++        questionText.setTypedText(touchgfx::TypedText(T_TEXT_START));
++        questionText.resizeToCurrentText();
++        questionText.setXY(boxX + (boxW - questionText.getWidth()) / 2,
++                           boxY + (boxH - questionText.getHeight()) / 2);
++    } else {
++        questionText.setTypedText(touchgfx::TypedText(finish ? T_TEXT_HOLD_TO_FINISH
++                                                             : T_TEXT_HOLD_TO_DISCARD));
++    }
+     questionText.invalidate();
+ 
+     // R1 = confirm (green finish / red discard). No R2/back hint: releasing R1 cancels.
+@@ -61,8 +75,17 @@ void TrackHoldConfirmationView::tearDownScreen()
+ 
+ void TrackHoldConfirmationView::handleKeyEvent(uint8_t key)
+ {
+-    // Releasing R1 before the countdown completes cancels and returns to the menu.
+-    if (key == SDK::GUI::Button::R1_RELEASE && !mFired) {
++    // Releasing R1 before the countdown completes cancels and returns to the
++    // menu it came from. A start must be R1 alone: another button going down
++    // (the case squeezed) cancels it too.
++    const bool other = key == SDK::GUI::Button::L1_PRESS ||
++                       key == SDK::GUI::Button::L2_PRESS ||
++                       key == SDK::GUI::Button::R2_PRESS;
++    if (!mFired && mMode == Model::HoldConfirmMode::Start &&
++        (key == SDK::GUI::Button::R1_RELEASE || other)) {
++        timerRing.stop();
++        application().gotoMainScreenNoTransition();
++    } else if (key == SDK::GUI::Button::R1_RELEASE && !mFired) {
+         timerRing.stop();
+         application().gotoTrackActionScreenNoTransition();
+     }
+@@ -86,7 +109,10 @@ void TrackHoldConfirmationView::onTimerComplete(int32_t /*value*/)
+ {
+     if (mFired) return;
+     mFired = true;
+-    if (mMode == Model::HoldConfirmMode::Finish) {
++    if (mMode == Model::HoldConfirmMode::Start) {
++        presenter->startTrack();
++        application().gotoTrackScreenNoTransition();
++    } else if (mMode == Model::HoldConfirmMode::Finish) {
+         application().gotoTrackSavedScreenNoTransition();
+     } else {
+         application().gotoTrackDiscardedScreenNoTransition();
+diff --git a/Examples/Apps/Hiking/Software/Libs/Header/Service.hpp b/Examples/Apps/Hiking/Software/Libs/Header/Service.hpp
+index 71bf9539..afc40267 100644
+--- a/Examples/Apps/Hiking/Software/Libs/Header/Service.hpp
++++ b/Examples/Apps/Hiking/Software/Libs/Header/Service.hpp
+@@ -35,6 +35,12 @@ private:
+     static constexpr uint32_t skBacklightTimeout     = 5000;
+     static constexpr uint32_t skSamplePeriod         = 1000;
+     static constexpr uint32_t skSampleLatency        = 1000;
++
++    /// Opening the app turns the GNSS on so a fix is ready for START. If no
++    /// activity starts within this long (the app was opened by a sleeve or a
++    /// pocket), the service closes the app rather than search until the
++    /// battery is flat.
++    static constexpr uint32_t skPreActivityBudgetMs  = 5 * 60 * 1000;
+     static constexpr float    skMapDistanceThreshold = 10.0f; // meters
+     static constexpr uint32_t skMapMaxPoints         = 70;
+     static constexpr uint32_t skBatteryLogPeriodMs   = 5 * 60 * 1000;
+@@ -150,6 +156,7 @@ private:
+     Track::State mTrackState          = Track::State::INACTIVE;
+     bool         mPreviousGpsFixState = false;
+     bool         mGpsInitialConnectFailed = false;  ///< GPS_LOCATION subscribe lost the startup ack race; the retry logs the recovery.
++    uint32_t     mPreActivitySinceMs = 0;          ///< when the pre-activity screen opened (GUI start)
+     bool         mGpsWanted = false;                 ///< GPS_LOCATION should stay connected (pre-activity + active track); cleared in disconnect() so the retry never re-wakes the GNSS post-activity.
+     bool         mSessionNotEmpty     = false;
+     bool         mLapNotEmpty         = false;
+diff --git a/Examples/Apps/Hiking/Software/Libs/Sources/Service.cpp b/Examples/Apps/Hiking/Software/Libs/Sources/Service.cpp
+index e96e68f1..e9201894 100644
+--- a/Examples/Apps/Hiking/Software/Libs/Sources/Service.cpp
++++ b/Examples/Apps/Hiking/Software/Libs/Sources/Service.cpp
+@@ -227,6 +227,18 @@ void Service::run()
+                     }
+                 }
+ 
++                // Nothing started within the budget: close the app, which
++                // releases the GNSS. The pre-activity screens hold nothing
++                // unsaved (settings are saved as they change).
++                if (mTrackState == Track::State::INACTIVE && mGpsWanted &&
++                    mKernel.sys.getTimeMs() - mPreActivitySinceMs >= skPreActivityBudgetMs) {
++                    LOG_INFO("No activity started within %u s of opening: closing\n",
++                             static_cast<unsigned>(skPreActivityBudgetMs / 1000u));
++                    requestAccessoryRelease();
++                    disconnect();
++                    return;   // ends the app, GUI included
++                }
++
+                 // Send to GUI real "local time" to display
+                 std::tm tmNow = mTimeTracker.getLocalTime(std::time(nullptr));
+                 SDK::send_msg<CustomMessage::Time>(mKernel, tmNow);
+@@ -404,6 +416,7 @@ void Service::handleSensorsData(uint16_t handle, SDK::Sensor::DataBatch& data)
+ void Service::onStartGUI()
+ {
+     mGuiStarted = true;
++    mPreActivitySinceMs = mKernel.sys.getTimeMs();
+ 
+     setCapabilities();
+     requestAccessoryPrepare();   // pre-warm external HR while on the pre-activity screen
+diff --git a/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainPresenter.hpp b/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainPresenter.hpp
+index 6a711fe4..c3e0d472 100644
+--- a/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainPresenter.hpp
++++ b/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainPresenter.hpp
+@@ -32,6 +32,7 @@ public:
+     virtual void onAccessoryStatus(uint8_t state, const char* name) override;  // WP-S4
+ 
+     void startTrack();
++    void beginHoldToStart();
+     void setPendingIntervalsMode(bool mode);
+     void exitApp();
+ 
+diff --git a/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainView.hpp b/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainView.hpp
+index 919db930..f9deae8b 100644
+--- a/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainView.hpp
++++ b/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/include/gui/main_screen/MainView.hpp
+@@ -25,6 +25,7 @@ protected:
+     using Menu = App::MenuNav::Root;
+ 
+     bool mGpsFix = false;
++    uint8_t mOthersDown = 0;   ///< L1, L2, R2 held (one bit each): a squeeze is not a start
+     SDK::GUI::SensorStatusRow mSensorRow;
+ 
+     MenuItemConfig mItems[Menu::ID_COUNT] {};
+diff --git a/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/include/gui/model/Model.hpp b/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/include/gui/model/Model.hpp
+index 283d6d11..f17bbd00 100644
+--- a/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/include/gui/model/Model.hpp
++++ b/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/include/gui/model/Model.hpp
+@@ -92,7 +92,7 @@ public:
+     uint8_t getAccessoryState() const;
+ 
+     // Hold-to-confirm: which action the shared TrackHoldConfirmation screen performs.
+-    enum class HoldConfirmMode { Finish, Discard };
++    enum class HoldConfirmMode { Finish, Discard, Start };
+     void setHoldConfirmMode(HoldConfirmMode mode);
+     HoldConfirmMode getHoldConfirmMode() const;
+ 
+diff --git a/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationPresenter.hpp b/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationPresenter.hpp
+index 873ac446..36ea1b6d 100644
+--- a/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationPresenter.hpp
++++ b/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationPresenter.hpp
+@@ -30,7 +30,17 @@ public:
+     /** Which action the hold screen should confirm (set by the action menu). */
+     Model::HoldConfirmMode getHoldConfirmMode() const { return model->getHoldConfirmMode(); }
+ 
+-    virtual void onIdleTimeout() override { model->application().gotoTrackActionScreenNoTransition(); }
++    /** Start mode: the hold completed, start the activity. */
++    void startTrack() { model->trackStart(false); }
++
++    virtual void onIdleTimeout() override
++    {
++        if (model->getHoldConfirmMode() == Model::HoldConfirmMode::Start) {
++            model->application().gotoMainScreenNoTransition();
++        } else {
++            model->application().gotoTrackActionScreenNoTransition();
++        }
++    }
+ 
+ private:
+     TrackHoldConfirmationPresenter();
+diff --git a/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationView.hpp b/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationView.hpp
+index f53f0f59..e4ac9c9f 100644
+--- a/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationView.hpp
++++ b/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/include/gui/trackholdconfirmation_screen/TrackHoldConfirmationView.hpp
+@@ -5,7 +5,10 @@
+ #include <gui/trackholdconfirmation_screen/TrackHoldConfirmationPresenter.hpp>
+ 
+ /**
+- * @brief Shared hold-to-confirm screen for ending an activity.
++ * @brief Shared hold-to-confirm screen for starting and ending an activity.
++ *
++ * Start: holding R1 on the main menu's START comes here, and completing the
++ * hold starts the activity; releasing early goes back to the menu.
+  *
+  * The hold begins on the action menu: pressing-and-holding R1 on Save/Discard
+  * navigates here and the countdown starts immediately, running while R1 stays
+diff --git a/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainPresenter.cpp b/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainPresenter.cpp
+index 3b0e6246..2e52aa1c 100644
+--- a/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainPresenter.cpp
++++ b/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainPresenter.cpp
+@@ -39,6 +39,11 @@ void MainPresenter::onAccessoryStatus(uint8_t state, const char* name)
+     view.setAccessoryStatus(state, name);
+ }
+ 
++void MainPresenter::beginHoldToStart()
++{
++    model->setHoldConfirmMode(Model::HoldConfirmMode::Start);
++}
++
+ void MainPresenter::startTrack()
+ {
+     model->trackStart(false);
+diff --git a/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainView.cpp b/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainView.cpp
+index cbdd1b77..452b24b2 100644
+--- a/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainView.cpp
++++ b/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/src/main_screen/MainView.cpp
+@@ -129,6 +129,16 @@ void MainView::onAnimationMiddle(int16_t index)
+ 
+ void MainView::handleKeyEvent(uint8_t key)
+ {
++    switch (key) {
++        case SDK::GUI::Button::L1_PRESS:   mOthersDown |= 1u;  break;
++        case SDK::GUI::Button::L2_PRESS:   mOthersDown |= 2u;  break;
++        case SDK::GUI::Button::R2_PRESS:   mOthersDown |= 4u;  break;
++        case SDK::GUI::Button::L1_RELEASE: mOthersDown &= ~1u; break;
++        case SDK::GUI::Button::L2_RELEASE: mOthersDown &= ~2u; break;
++        case SDK::GUI::Button::R2_RELEASE: mOthersDown &= ~4u; break;
++        default: break;
++    }
++
+     if (key == SDK::GUI::Button::L1) {
+         menuLayout.selectPrev();
+     }
+@@ -137,6 +147,16 @@ void MainView::handleKeyEvent(uint8_t key)
+         menuLayout.selectNext();
+     }
+ 
++    // START is held, not clicked, as finishing already is: a click is what
++    // a sleeve or a pocket produces. The hold must be R1 alone, so squeezing
++    // the case does not count either. The hold screen starts the activity.
++    if (key == SDK::GUI::Button::R1_PRESS && mOthersDown == 0 &&
++        menuLayout.getSelectedItem() == Menu::ID_START) {
++        presenter->beginHoldToStart();
++        application().gotoTrackHoldConfirmationScreenNoTransition();
++        return;
++    }
++
+     if (key == SDK::GUI::Button::R1) {
+         onConfirm();
+     }
+@@ -155,13 +175,7 @@ void MainView::onConfirm()
+ 
+     switch (idx) {
+     case Menu::ID_START:
+-        if (mGpsFix == true) {
+-            presenter->startTrack();
+-            application().gotoTrackScreenNoTransition();
+-        } else {
+-            presenter->setPendingIntervalsMode(false);
+-            application().gotoTrackStartConfirmationScreenNoTransition();
+-        }
++        // Started by holding R1 (handleKeyEvent), never by a click.
+         break;
+ 
+     case Menu::ID_INTERVALS:
+diff --git a/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/src/trackholdconfirmation_screen/TrackHoldConfirmationView.cpp b/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/src/trackholdconfirmation_screen/TrackHoldConfirmationView.cpp
+index e2963e7a..84c2b5eb 100644
+--- a/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/src/trackholdconfirmation_screen/TrackHoldConfirmationView.cpp
++++ b/Examples/Apps/Running/Software/Apps/TouchGFX-GUI/gui/src/trackholdconfirmation_screen/TrackHoldConfirmationView.cpp
+@@ -18,11 +18,25 @@ void TrackHoldConfirmationView::setupScreen()
+     TrackHoldConfirmationViewBase::setupScreen();
+ 
+     mMode = presenter->getHoldConfirmMode();
+-    const bool finish = (mMode == Model::HoldConfirmMode::Finish);
++    const bool start  = (mMode == Model::HoldConfirmMode::Start);
++    const bool finish = (mMode == Model::HoldConfirmMode::Finish) || start;  // both green
+ 
+-    // Label ("Hold to Finish" / "Hold to Discard").
+-    questionText.setTypedText(touchgfx::TypedText(finish ? T_TEXT_HOLD_TO_FINISH
+-                                                         : T_TEXT_HOLD_TO_DISCARD));
++    // Label ("Hold to Finish" / "Hold to Discard" / "Start").
++    if (start) {
++        // The text database has no "Hold to Start": the menu's "Start",
++        // centred in the label's box, with the countdown below it.
++        const int16_t boxX = questionText.getX();
++        const int16_t boxY = questionText.getY();
++        const int16_t boxW = questionText.getWidth();
++        const int16_t boxH = questionText.getHeight();
++        questionText.setTypedText(touchgfx::TypedText(T_TEXT_START));
++        questionText.resizeToCurrentText();
++        questionText.setXY(boxX + (boxW - questionText.getWidth()) / 2,
++                           boxY + (boxH - questionText.getHeight()) / 2);
++    } else {
++        questionText.setTypedText(touchgfx::TypedText(finish ? T_TEXT_HOLD_TO_FINISH
++                                                             : T_TEXT_HOLD_TO_DISCARD));
++    }
+     questionText.invalidate();
+ 
+     // R1 = confirm (green finish / red discard). No R2/back hint: releasing R1 cancels.
+@@ -61,8 +75,17 @@ void TrackHoldConfirmationView::tearDownScreen()
+ 
+ void TrackHoldConfirmationView::handleKeyEvent(uint8_t key)
+ {
+-    // Releasing R1 before the countdown completes cancels and returns to the menu.
+-    if (key == SDK::GUI::Button::R1_RELEASE && !mFired) {
++    // Releasing R1 before the countdown completes cancels and returns to the
++    // menu it came from. A start must be R1 alone: another button going down
++    // (the case squeezed) cancels it too.
++    const bool other = key == SDK::GUI::Button::L1_PRESS ||
++                       key == SDK::GUI::Button::L2_PRESS ||
++                       key == SDK::GUI::Button::R2_PRESS;
++    if (!mFired && mMode == Model::HoldConfirmMode::Start &&
++        (key == SDK::GUI::Button::R1_RELEASE || other)) {
++        timerRing.stop();
++        application().gotoMainScreenNoTransition();
++    } else if (key == SDK::GUI::Button::R1_RELEASE && !mFired) {
+         timerRing.stop();
+         application().gotoTrackActionScreenNoTransition();
+     }
+@@ -86,7 +109,10 @@ void TrackHoldConfirmationView::onTimerComplete(int32_t /*value*/)
+ {
+     if (mFired) return;
+     mFired = true;
+-    if (mMode == Model::HoldConfirmMode::Finish) {
++    if (mMode == Model::HoldConfirmMode::Start) {
++        presenter->startTrack();
++        application().gotoTrackScreenNoTransition();
++    } else if (mMode == Model::HoldConfirmMode::Finish) {
+         application().gotoTrackSavedScreenNoTransition();
+     } else {
+         application().gotoTrackDiscardedScreenNoTransition();
+diff --git a/Examples/Apps/Running/Software/Libs/Header/Service.hpp b/Examples/Apps/Running/Software/Libs/Header/Service.hpp
+index bc981a46..127b8c27 100644
+--- a/Examples/Apps/Running/Software/Libs/Header/Service.hpp
++++ b/Examples/Apps/Running/Software/Libs/Header/Service.hpp
+@@ -48,6 +48,12 @@ private:
+     static constexpr uint32_t skSamplePeriod         = 1000;
+     static constexpr uint32_t skSampleLatency        = 1000;
+ 
++    /// Opening the app turns the GNSS on so a fix is ready for START. If no
++    /// activity starts within this long (the app was opened by a sleeve or a
++    /// pocket), the service closes the app rather than search until the
++    /// battery is flat.
++    static constexpr uint32_t skPreActivityBudgetMs  = 5 * 60 * 1000;
++
+     static constexpr float    skMapDistanceThreshold = 10.0f; // meters
+     static constexpr uint32_t skMapMaxPoints         = 70;
+ 
+@@ -188,6 +194,7 @@ private:
+     Track::State mTrackState          = Track::State::INACTIVE;
+     bool         mPreviousGpsFixState = false;
+     bool         mGpsInitialConnectFailed = false;  ///< GPS_LOCATION subscribe lost the startup ack race; the retry logs the recovery.
++    uint32_t     mPreActivitySinceMs = 0;          ///< when the pre-activity screen opened (GUI start)
+     bool         mGpsWanted = false;                 ///< GPS_LOCATION should stay connected (pre-activity + active track); cleared in disconnect() so the retry never re-wakes the GNSS post-activity.
+     bool         mSessionNotEmpty     = false;
+     bool         mLapNotEmpty         = false;
+diff --git a/Examples/Apps/Running/Software/Libs/Sources/Service.cpp b/Examples/Apps/Running/Software/Libs/Sources/Service.cpp
+index 90d3b8b7..c856a072 100644
+--- a/Examples/Apps/Running/Software/Libs/Sources/Service.cpp
++++ b/Examples/Apps/Running/Software/Libs/Sources/Service.cpp
+@@ -257,6 +257,18 @@ void Service::run()
+                     }
+                 }
+ 
++                // Nothing started within the budget: close the app, which
++                // releases the GNSS. The pre-activity screens hold nothing
++                // unsaved (settings are saved as they change).
++                if (mTrackState == Track::State::INACTIVE && mGpsWanted &&
++                    mKernel.sys.getTimeMs() - mPreActivitySinceMs >= skPreActivityBudgetMs) {
++                    LOG_INFO("No activity started within %u s of opening: closing\n",
++                             static_cast<unsigned>(skPreActivityBudgetMs / 1000u));
++                    requestAccessoryRelease();
++                    disconnect();
++                    return;   // ends the app, GUI included
++                }
++
+                 // Send to GUI real "local time" to display
+                 std::tm tmNow = mTimeTracker.getLocalTime(std::time(nullptr));
+                 SDK::send_msg<CustomMessage::Time>(mKernel, tmNow);
+@@ -471,6 +483,7 @@ void Service::handleSensorsData(uint16_t handle, SDK::Sensor::DataBatch& data)
+ void Service::onStartGUI()
+ {
+     mGuiStarted = true;
++    mPreActivitySinceMs = mKernel.sys.getTimeMs();
+ 
+     setCapabilities();
+     requestAccessoryPrepare();   // pre-warm external HR while on the pre-activity screen
