@@ -1,0 +1,79 @@
+{
+  "manifest_version": 1,
+  "type": [
+    "utility"
+  ],
+  "name": "RideLock",
+  "icon": "Resources/icon_60x60.png",
+  "binary": "RideLock_0.1.0.uapp",
+  "appVersion": "0.1.0",
+  "minKernelVersion": "1.4.0",
+  "requiredHardware": [],
+  "id": "5CBC53B94083EF7D",
+  "description": "A lock screen for riding in a jacket: buttons do nothing until you press the lit ones in turn. Relocks itself, and warns if something drains the battery behind it.",
+  "configFile": "app_config.json",
+  "configFields": [
+    {
+      "id": "unlockSequence",
+      "type": "string",
+      "label": "Unlock sequence",
+      "description": "Buttons to press in turn, e.g. L1 R1 R2 L2 L1 R1. Use both sides, never the same button twice in a row. Longer is safer.",
+      "default": "L1 R1 R2 L2 L1 R1",
+      "minLength": 5,
+      "maxLength": 32,
+      "pattern": "[LlRr12 ,-]+",
+      "validationMessage": "2 to 8 of L1, L2, R1, R2, separated by spaces."
+    },
+    {
+      "id": "relockMinutes",
+      "type": "int",
+      "label": "Relock after",
+      "description": "Put the lock back up this long after unlocking. 0 keeps it off until you open RideLock again.",
+      "default": 2,
+      "min": 0,
+      "max": 120,
+      "unit": "min"
+    },
+    {
+      "id": "lockAtBoot",
+      "type": "bool",
+      "label": "Lock at start-up",
+      "description": "Show the lock as soon as the watch starts, so a reboot or a power-on inside a sleeve comes up locked.",
+      "default": true
+    },
+    {
+      "id": "notificationsWhileLocked",
+      "type": "bool",
+      "label": "Notifications while locked",
+      "description": "Let phone notifications appear over the lock screen.",
+      "default": true
+    },
+    {
+      "id": "drainAlertMilliamps",
+      "type": "int",
+      "label": "Drain alert above",
+      "description": "Vibrate if the battery current stays above this while locked, which means something (a GPS activity) is running behind the lock. 0 turns the alert off.",
+      "default": 8,
+      "min": 0,
+      "max": 200,
+      "unit": "mA"
+    },
+    {
+      "id": "drainWindowMinutes",
+      "type": "int",
+      "label": "Drain alert after",
+      "description": "How long the current must stay high before the alert.",
+      "default": 10,
+      "min": 2,
+      "max": 60,
+      "unit": "min"
+    },
+    {
+      "id": "showCurrent",
+      "type": "bool",
+      "label": "Show battery current",
+      "description": "Show the measured battery current on the lock screen (an experiment aid).",
+      "default": true
+    }
+  ]
+}

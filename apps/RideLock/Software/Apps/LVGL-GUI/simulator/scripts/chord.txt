@@ -1,0 +1,15 @@
+# Squeezing two buttons at once never counts as a step.
+clock 9 5 1 5 9 12h
+wait 1500
+power 100 0.9 0
+wait 300
+press L1
+wait 80
+press R1
+wait 150
+release L1
+wait 50
+release R1
+wait 400
+shot 08-chord.ppm
+expect_running

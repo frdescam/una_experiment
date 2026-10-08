@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "values": {
+    "unlockSequence": "L1 R1 R2 L2 L1 R1",
+    "relockMinutes": 2,
+    "lockAtBoot": true,
+    "notificationsWhileLocked": true,
+    "drainAlertMilliamps": 8,
+    "drainWindowMinutes": 10,
+    "showCurrent": true
+  }
+}

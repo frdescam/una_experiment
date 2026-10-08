@@ -1,0 +1,5 @@
+# Build products land here; only the package metadata is tracked.
+*
+!.gitignore
+!app-manifest.json
+!app_config.example.json

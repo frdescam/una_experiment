@@ -1,0 +1,8 @@
+# The service's watchdog reports a drain (simulated here: the simulator has no
+# fuel gauge). The date line becomes the warning.
+clock 21 42 0 11 9
+wait 1500
+power 61 23.4 1
+wait 300
+shot 07-drain.ppm
+expect_running

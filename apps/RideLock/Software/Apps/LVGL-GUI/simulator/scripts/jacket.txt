@@ -1,0 +1,46 @@
+# A sleeve rubbing the right-hand buttons: unlocking pauses, and stays paused
+# while the rubbing goes on. Even the right sequence does nothing until the
+# buttons have been left alone for 15 s.
+clock 14 7 4 8 9
+wait 1500
+power 87 1.4 0
+wait 300
+tap R1 80
+wait 250
+tap R2 60
+wait 150
+tap R1 700                  # a hold
+wait 300
+tap R2 90
+wait 200
+tap R1 70
+wait 600
+shot 05-paused.ppm
+expect_running
+tap L1                      # the real sequence, too soon: ignored
+wait 350
+tap R1
+wait 350
+tap R2
+wait 350
+tap L2
+wait 350
+tap L1
+wait 350
+tap R1
+wait 1000
+expect_running
+wait 15500                  # hands off
+shot 06-cooled.ppm
+tap L1
+wait 350
+tap R1
+wait 350
+tap R2
+wait 350
+tap L2
+wait 350
+tap L1
+wait 350
+tap R1
+expect_exit 3000
