@@ -49,7 +49,7 @@ UNA is a modular, repairable GPS sports watch. It has a 1.2" round 240×240
 memory-in-pixel display with a backlight, an STM32 MCU, a dual-frequency GNSS, an
 optical HR sensor, an IMU, a barometer and BLE. The battery is a user-replaceable
 280 mAh cell. UNA quotes up to 10 days of everyday use and 20 hours in GPS mode
-([UNA product page](https://unawatch.com/products/una-watch),
+([product listing](https://heyupnow.com/products/una-the-worlds-first-modular-gps-sports-watch),
 [Notebookcheck](https://www.notebookcheck.net/UNA-Watch-Repairable-Garmin-alternative-launches-with-10-day-battery-life-and-MIP-display.1353765.0.html)).
 That is roughly **1.2 mA average in everyday use against about 14 mA with GPS**.
 An activity left running by accident drains the battery about **12 times faster**.
