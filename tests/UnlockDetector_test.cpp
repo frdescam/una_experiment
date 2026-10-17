@@ -16,7 +16,7 @@ constexpr uint32_t kStep = 450;   // a person's pace between taps
 class UnlockDetectorTest : public ::testing::Test
 {
 protected:
-    UnlockDetector d;            // default sequence L1 R1 R2 L2 L1 R1, default timing
+    UnlockDetector d;            // default sequence UP SELECT BACK DOWN, default timing
     uint32_t       t = 100000;   // well past any start-up quiet period
 
     void SetUp() override { d.reset(0); }
@@ -44,7 +44,7 @@ TEST_F(UnlockDetectorTest, TheSequenceUnlocks)
 
 TEST_F(UnlockDetectorTest, EachCorrectStepReportsProgressAndTheNextButton)
 {
-    EXPECT_EQ(d.length(), 6);
+    EXPECT_EQ(d.length(), 4);
     EXPECT_EQ(d.expected(), Button::Up);
     EXPECT_EQ(tap(d, Button::Up, t), Outcome::Progress);
     EXPECT_EQ(d.progress(), 1);
@@ -53,10 +53,7 @@ TEST_F(UnlockDetectorTest, EachCorrectStepReportsProgressAndTheNextButton)
     EXPECT_EQ(tap(d, Button::Back, t += kStep), Outcome::Progress);
     EXPECT_EQ(d.progress(), 3);
     EXPECT_EQ(d.expected(), Button::Down);
-    EXPECT_EQ(tap(d, Button::Down, t += kStep), Outcome::Progress);
-    EXPECT_EQ(tap(d, Button::Up, t += kStep), Outcome::Progress);
-    EXPECT_EQ(d.expected(), Button::Select);
-    EXPECT_EQ(tap(d, Button::Select, t += kStep), Outcome::Unlocked);
+    EXPECT_EQ(tap(d, Button::Down, t += kStep), Outcome::Unlocked);
 }
 
 TEST_F(UnlockDetectorTest, AWrongButtonStartsAgain)
@@ -64,8 +61,7 @@ TEST_F(UnlockDetectorTest, AWrongButtonStartsAgain)
     tap(d, Button::Up, t);
     tap(d, Button::Select, t += kStep);
     tap(d, Button::Back, t += kStep);
-    tap(d, Button::Down, t += kStep);
-    EXPECT_EQ(tap(d, Button::Select, t += kStep), Outcome::Wrong);   // L1 was due
+    EXPECT_EQ(tap(d, Button::Up, t += kStep), Outcome::Wrong);   // DOWN was due
     EXPECT_EQ(d.progress(), 0);
     EXPECT_FALSE(d.unlocked());
 }
@@ -84,7 +80,7 @@ TEST_F(UnlockDetectorTest, TheFirstStepNeedsAQuietMoment)
 
 TEST_F(UnlockDetectorTest, QuietIsMeasuredFromTheLastRelease)
 {
-    // A long rub on R2 ends; the first step must wait quietMs after the release.
+    // A long rub on BACK ends; the first step must wait quietMs after the release.
     down(d, Button::Back, t);
     up(d, Button::Back, t + 3000, 3000);
     t += 3000 + 200;
@@ -97,9 +93,7 @@ TEST_F(UnlockDetectorTest, LaterStepsDoNotNeedQuiet)
     EXPECT_EQ(tap(d, Button::Up, t, 80), Outcome::Progress);
     EXPECT_EQ(tap(d, Button::Select, t += 150, 80), Outcome::Progress);
     EXPECT_EQ(tap(d, Button::Back, t += 150, 80), Outcome::Progress);
-    EXPECT_EQ(tap(d, Button::Down, t += 150, 80), Outcome::Progress);
-    EXPECT_EQ(tap(d, Button::Up, t += 150, 80), Outcome::Progress);
-    EXPECT_EQ(tap(d, Button::Select, t += 150, 80), Outcome::Unlocked);
+    EXPECT_EQ(tap(d, Button::Down, t += 150, 80), Outcome::Unlocked);
 }
 
 TEST_F(UnlockDetectorTest, TwoButtonsAtOnceIsAChord)
@@ -149,10 +143,10 @@ TEST_F(UnlockDetectorTest, ALateStepStartsAFreshAttemptEvenWithoutPoll)
 TEST_F(UnlockDetectorTest, APinnedButtonDoesNotLockTheWearerOut)
 {
     Sequence s;
-    ASSERT_TRUE(parseSequence("L1 R1", s));
+    ASSERT_TRUE(parseSequence("UP SELECT DOWN", s));
     d.configure(s, UnlockTiming{}, 0);
 
-    // The cuff pins R2 down for good.
+    // The cuff pins BACK down for good.
     down(d, Button::Back, t);
 
     // While it is fresh, any other press is a chord.
@@ -162,7 +156,8 @@ TEST_F(UnlockDetectorTest, APinnedButtonDoesNotLockTheWearerOut)
     // Once it has been down past stuckMs it is ignored.
     t += d.timing().stuckMs + 1000;
     EXPECT_EQ(tap(d, Button::Up, t), Outcome::Progress);
-    EXPECT_EQ(tap(d, Button::Select, t + kStep), Outcome::Unlocked);
+    EXPECT_EQ(tap(d, Button::Select, t += kStep), Outcome::Progress);
+    EXPECT_EQ(tap(d, Button::Down, t += kStep), Outcome::Unlocked);
 }
 
 TEST_F(UnlockDetectorTest, AKernelThatOnlySendsClicksStillWorks)
@@ -179,7 +174,7 @@ TEST_F(UnlockDetectorTest, AKernelThatOnlySendsClicksStillWorks)
 TEST_F(UnlockDetectorTest, AClickArrivingAfterItsReleaseIsNotASecondStep)
 {
     // Some ports deliver PRESS, RELEASE, CLICK. The late CLICK must not count
-    // again (that would be "L1 L1" and a Wrong).
+    // again (that would be "UP UP" and a Wrong).
     EXPECT_EQ(down(d, Button::Up, t), Outcome::None);
     EXPECT_EQ(d.onInput(Button::Up, Input::Release, t + 100), Outcome::Progress);
     EXPECT_EQ(d.onInput(Button::Up, Input::Click, t + 200), Outcome::None);
@@ -209,7 +204,7 @@ TEST_F(UnlockDetectorTest, ResetForgetsHeldButtonsAndRestartsTheQuietPeriod)
     d.reset(t + 100);
     // Too soon after the reset to start.
     EXPECT_EQ(tap(d, Button::Up, t + 300), Outcome::NotQuiet);
-    // Later, and no chord with the forgotten R1.
+    // Later, and no chord with the forgotten SELECT.
     t += 100 + 300 + 120 + d.timing().quietMs;
     EXPECT_EQ(enterDefault(), Outcome::Unlocked);
 }
@@ -311,12 +306,17 @@ protected:
     UnlockDetector d;
     uint32_t       t = 100000;
 
-    void SetUp() override { useSequence("L1 R1 R2", 1000); }
+    void SetUp() override { useSequence("UP SELECT BACK", 1000); }
 
     void useSequence(const char* text, uint32_t holdMs)
     {
         Sequence s;
         ASSERT_TRUE(parseSequence(text, s));
+        use(s, holdMs);
+    }
+
+    void use(const Sequence& s, uint32_t holdMs)
+    {
         UnlockTiming timing;
         timing.finalHoldMs = holdMs;
         d.configure(s, timing, 0);
@@ -354,7 +354,13 @@ TEST_F(HoldToFinishTest, AHoldOnTheLastButtonUnlocks)
 
 TEST_F(HoldToFinishTest, TwoStepsAndAHold)
 {
-    useSequence("L1 R1", 800);
+    // Shorter than the settings accept, but the detector takes any sequence
+    // (docs/sequence-study.md measures this one).
+    Sequence s;
+    s.length   = 2;
+    s.steps[0] = Button::Up;
+    s.steps[1] = Button::Select;
+    use(s, 800);
     EXPECT_FALSE(d.holdDue());
     EXPECT_EQ(tap(d, Button::Up, t), Outcome::Progress);
     EXPECT_TRUE(d.holdDue());
@@ -415,7 +421,7 @@ TEST_F(HoldToFinishTest, AnotherButtonDuringTheHoldEndsTheAttempt)
 
 TEST_F(HoldToFinishTest, APinnedButtonDoesNotSpoilTheHold)
 {
-    down(d, Button::Down, t);                       // the cuff pins L2
+    down(d, Button::Down, t);                       // the cuff pins DOWN
     t += d.timing().stuckMs + 1000;
     tapPrefix();
     EXPECT_EQ(tap(d, Button::Back, t, 1200), Outcome::Unlocked);

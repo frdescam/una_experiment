@@ -17,12 +17,12 @@
       "id": "unlockSequence",
       "type": "string",
       "label": "Unlock sequence",
-      "description": "Buttons to press in turn, e.g. UP SELECT BACK DOWN. Use both sides, never the same button twice in a row. Longer is safer.",
-      "default": "UP SELECT BACK DOWN UP SELECT",
+      "description": "Buttons to press in turn: 3 to 8 of UP, DOWN, SELECT, BACK, using at least three different ones, never the same twice in a row. Each extra step makes an accidental unlock about ten times rarer.",
+      "default": "UP SELECT BACK DOWN",
       "minLength": 5,
       "maxLength": 64,
       "pattern": "[A-Za-z12 ,-]+",
-      "validationMessage": "2 to 8 of UP, DOWN, SELECT, BACK, separated by spaces."
+      "validationMessage": "3 to 8 of UP, DOWN, SELECT, BACK, separated by spaces."
     },
     {
       "id": "relockMinutes",

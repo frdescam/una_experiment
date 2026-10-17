@@ -18,11 +18,6 @@ bool isSeparator(char c)
     return c == ' ' || c == ',' || c == '-' || c == '\t';
 }
 
-bool isLeft(Button b)
-{
-    return b == Button::Up || b == Button::Down;
-}
-
 /// The names parseSequence() accepts: UNA's, then the positions.
 struct Token {
     const char* text;
@@ -74,13 +69,11 @@ const char* buttonName(Button b)
 Sequence defaultSequence()
 {
     Sequence seq;
-    seq.length   = 6;
+    seq.length   = 4;
     seq.steps[0] = Button::Up;
     seq.steps[1] = Button::Select;
     seq.steps[2] = Button::Back;
     seq.steps[3] = Button::Down;
-    seq.steps[4] = Button::Up;
-    seq.steps[5] = Button::Select;
     return seq;
 }
 
@@ -126,16 +119,16 @@ bool parseSequence(const char* text, Sequence& out)
         return false;
     }
 
-    bool left  = false;
-    bool right = false;
+    bool   used[kButtonCount] = {};
+    size_t buttons            = 0;
     for (size_t i = 0; i < seq.length; ++i) {
-        if (isLeft(seq.steps[i])) {
-            left = true;
-        } else {
-            right = true;
+        bool& seen = used[static_cast<size_t>(seq.steps[i])];
+        if (!seen) {
+            seen = true;
+            ++buttons;
         }
     }
-    if (!left || !right) {
+    if (buttons < kMinButtons) {
         return false;
     }
 

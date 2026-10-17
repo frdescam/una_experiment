@@ -30,10 +30,14 @@ enum class Button : uint8_t {
 
 inline constexpr size_t kButtonCount = 4;
 
-/// Shortest and longest sequence accepted. Two steps is the floor because
-/// one button alone is exactly what a sleeve produces; eight is a buffer size.
-inline constexpr size_t kMinSequence = 2;
+/// Shortest and longest sequence accepted, and the fewest different buttons
+/// it must use. Every two-step code, and every code on just two buttons (a
+/// cuff rocking across UP and SELECT, say), unlocks by accident hundreds of
+/// times per 1000 h even in docs/sequence-study.md's milder noise; eight
+/// steps is a buffer size. Three different buttons always span both sides.
+inline constexpr size_t kMinSequence = 3;
 inline constexpr size_t kMaxSequence = 8;
+inline constexpr size_t kMinButtons  = 3;
 
 struct Sequence {
     uint8_t length = 0;
@@ -45,12 +49,14 @@ struct Sequence {
 /// "UP", "DOWN", "SELECT" or "BACK".
 const char* buttonName(Button b);
 
-/// The default unlock: one and a half laps of the case, clockwise from the
-/// top left (L1 R1 R2 L2 L1 R1). Every step moves to the neighbouring button
-/// and uses both sides, which a cuff pressing one side cannot do; six steps
-/// is what the jacket model (tests/JacketModel.hpp) needed to keep random
-/// pressing on all four buttons below one false unlock per thousand hours.
-/// The lock screen lights the next button, so it need not be memorised.
+/// The default unlock: one lap of the case, clockwise from the top left (UP
+/// SELECT BACK DOWN). Every step moves to the neighbouring button, and it
+/// needs all four, which a cuff reaching two or three of them never manages
+/// at any rate of pressing. In docs/sequence-study.md, the worst noise model
+/// opens it about 20 times per 1000 h at its harshest and about once at a
+/// level where the unlocked watch opens one activity an hour; each step more
+/// or less moves that about tenfold. The lock screen lights the next button,
+/// so it need not be memorised.
 Sequence defaultSequence();
 
 /**
@@ -63,8 +69,9 @@ Sequence defaultSequence();
  *   - fewer than kMinSequence or more than kMaxSequence steps;
  *   - the same button twice in a row, which one stuck or bouncing button can
  *     produce on its own;
- *   - a sequence that uses only one side of the case, which a sleeve pressing
- *     that side could produce.
+ *   - fewer than kMinButtons different buttons (so both sides are used): a
+ *     sleeve pressing one side, or rocking across two buttons, produces
+ *     those.
  *
  * @return true when @p text was valid and @p out was written.
  */

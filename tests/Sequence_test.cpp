@@ -18,9 +18,9 @@ std::string fmt(const Sequence& s)
 
 } // namespace
 
-TEST(Sequence, DefaultGoesRoundTheCaseClockwiseOneAndAHalfTimes)
+TEST(Sequence, DefaultGoesOnceRoundTheCaseClockwise)
 {
-    EXPECT_EQ(fmt(defaultSequence()), "UP SELECT BACK DOWN UP SELECT");
+    EXPECT_EQ(fmt(defaultSequence()), "UP SELECT BACK DOWN");
     Sequence parsed;
     ASSERT_TRUE(parseSequence(fmt(defaultSequence()).c_str(), parsed));   // and it is a valid one
     EXPECT_EQ(fmt(parsed), fmt(defaultSequence()));
@@ -55,21 +55,29 @@ TEST(Sequence, StillParsesThePositionNamesOfEarlierVersions)
     }
 }
 
-TEST(Sequence, AcceptsTheShortestTwoSidedSequence)
+TEST(Sequence, AcceptsTheShortestSequence)
 {
     Sequence s;
-    ASSERT_TRUE(parseSequence("DOWN SELECT", s));
-    EXPECT_EQ(s.length, 2);
-    EXPECT_EQ(s[0], Button::Down);
+    ASSERT_TRUE(parseSequence("UP SELECT BACK", s));
+    EXPECT_EQ(s.length, 3);
+    EXPECT_EQ(s[0], Button::Up);
     EXPECT_EQ(s[1], Button::Select);
+    EXPECT_EQ(s[2], Button::Back);
 }
 
 TEST(Sequence, AcceptsEightSteps)
 {
     Sequence s;
-    ASSERT_TRUE(parseSequence("SELECT DOWN SELECT DOWN SELECT DOWN SELECT DOWN", s));
+    ASSERT_TRUE(parseSequence("SELECT DOWN SELECT DOWN SELECT DOWN SELECT BACK", s));
     EXPECT_EQ(s.length, 8);
-    EXPECT_EQ(fmt(s), "SELECT DOWN SELECT DOWN SELECT DOWN SELECT DOWN");   // the longest text: 47
+    EXPECT_EQ(fmt(s), "SELECT DOWN SELECT DOWN SELECT DOWN SELECT BACK");   // the longest text: 47
+}
+
+TEST(Sequence, AButtonMayComeBackLater)
+{
+    Sequence s;
+    ASSERT_TRUE(parseSequence("UP BACK UP SELECT", s));
+    EXPECT_EQ(s.length, 4);
 }
 
 TEST(Sequence, RejectsWhatASleeveCouldProduceOrWhatIsNotASequence)
@@ -77,15 +85,19 @@ TEST(Sequence, RejectsWhatASleeveCouldProduceOrWhatIsNotASequence)
     const char* bad[] = {
         "",                          // empty
         "UP",                        // one step
-        "UP UP SELECT",              // a repeat in a row
-        "UP L1 SELECT",              // the same button twice, under two names
-        "UP DOWN UP",                // one side only
-        "SELECT BACK",               // one side only
-        "L3 R1",                     // no such button
+        "UP SELECT",                 // two steps
+        "UP UP SELECT BACK",         // a repeat in a row
+        "UP L1 SELECT BACK",         // the same button twice, under two names
+        "UP DOWN UP DOWN",           // one side only
+        "SELECT BACK SELECT",        // one side only
+        "UP SELECT UP",              // two buttons: a cuff rocking across the top row
+        "DOWN BACK DOWN BACK",       // ...or the bottom one
+        "UP BACK UP BACK UP BACK",   // ...or a diagonal
+        "L3 R1 R2",                  // no such button
         "LEFT RIGHT",
         "UPS SELECT",                // not a name
-        "UP SELECT x",               // trailing junk
-        "UP SELEC",                  // truncated
+        "UP SELECT BACK x",          // trailing junk
+        "UP SELECT BAC",             // truncated
         "UP SELECT DOWN BACK UP SELECT DOWN BACK UP",   // nine steps
     };
     const std::string before = fmt(defaultSequence());

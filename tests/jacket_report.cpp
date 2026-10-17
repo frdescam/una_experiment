@@ -15,6 +15,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -34,18 +35,20 @@ struct Variant {
     ButtonLock::UnlockTiming timing;
 };
 
-ButtonLock::Sequence seq(const char* text)
+/// A sequence from its steps, as the detector takes it. Not through
+/// parseSequence(): the report also measures codes the settings refuse.
+ButtonLock::Sequence steps(std::initializer_list<Button> list)
 {
     ButtonLock::Sequence s;
-    if (!ButtonLock::parseSequence(text, s)) {
-        std::fprintf(stderr, "bad sequence %s\n", text);
-        std::exit(2);
+    for (Button b : list) {
+        s.steps[s.length++] = b;
     }
     return s;
 }
 
 std::vector<Variant> variants()
 {
+    using B = Button;
     const ButtonLock::UnlockTiming def;
 
     ButtonLock::UnlockTiming noQuiet = def;
@@ -64,21 +67,25 @@ std::vector<Variant> variants()
     naive.maxPressMs = 0xFFFFFFFFu;
     naive.rejectLimit = 0;
 
-    const ButtonLock::Sequence four = seq("L1 R1 R2 L2");
+    const ButtonLock::Sequence six   = steps({ B::Up, B::Select, B::Back, B::Down, B::Up, B::Select });
+    const ButtonLock::Sequence five  = steps({ B::Up, B::Select, B::Back, B::Down, B::Up });
+    const ButtonLock::Sequence four  = steps({ B::Up, B::Select, B::Back, B::Down });
+    const ButtonLock::Sequence three = steps({ B::Up, B::Select, B::Back });
+    const ButtonLock::Sequence two   = steps({ B::Up, B::Select });
     return {
-        { "ButtonLock default (L1 R1 R2 L2 L1 R1)", ButtonLock::defaultSequence(), def },
-        { "  without the cool-down",          ButtonLock::defaultSequence(), noCooldown },
-        { "  without the quiet rule",         ButtonLock::defaultSequence(), noQuiet },
-        { "  without the chord rule",         ButtonLock::defaultSequence(), noChord },
-        { "  5 steps (L1 R1 R2 L2 L1)",       seq("L1 R1 R2 L2 L1"),       def     },
-        { "  4 steps (L1 R1 R2 L2)",          four,                        def     },
-        { "    4 steps without the cool-down", four,                       noCooldown },
-        { "    4 steps without the quiet rule", four,                      noQuiet },
-        { "    4 steps without the chord rule", four,                      noChord },
-        { "  2 steps (L1 R1)",                seq("L1 R1"),                def     },
-        { "Naive 6-click lock (no rules)",    ButtonLock::defaultSequence(), naive   },
-        { "Naive 4-click lock (no rules)",    four,                        naive   },
-        { "Naive 2-click lock (no rules)",    seq("L1 R1"),                naive   },
+        { "ButtonLock default (UP SELECT BACK DOWN)", ButtonLock::defaultSequence(), def },
+        { "  without the cool-down",           ButtonLock::defaultSequence(), noCooldown },
+        { "  without the quiet rule",          ButtonLock::defaultSequence(), noQuiet },
+        { "  without the chord rule",          ButtonLock::defaultSequence(), noChord },
+        { "  6 steps (UP SELECT BACK DOWN UP SELECT, the first default)", six, def },
+        { "  5 steps (UP SELECT BACK DOWN UP)", five,                  def     },
+        { "  3 steps (UP SELECT BACK)",        three,                  def     },
+        { "    3 steps without the cool-down", three,                  noCooldown },
+        { "  2 steps (UP SELECT, refused by the settings)", two,       def     },
+        { "Naive 6-click lock (no rules)",     six,                    naive   },
+        { "Naive 4-click lock (no rules)",     four,                   naive   },
+        { "Naive 3-click lock (no rules)",     three,                  naive   },
+        { "Naive 2-click lock (no rules)",     two,                    naive   },
     };
 }
 
@@ -157,5 +164,7 @@ int main(int argc, char** argv)
         }
         std::printf("\n");
     }
+    std::printf("\nA 0 is not \"never\": it means below about %.1f per 1000 h, at 95 %% confidence.\n",
+                3000.0 / hours);
     return 0;
 }

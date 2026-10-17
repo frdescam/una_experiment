@@ -57,7 +57,7 @@ TEST(JacketHarness, FramePacingDeliversOnePerFrameAndDropsTheOldest)
     }
 }
 
-TEST(JacketHarness, StockR1TwiceOpensAnActivity)
+TEST(JacketHarness, StockSelectTwiceOpensAnActivity)
 {
     const auto r = runStock(clicks({ Button::Select, Button::Select }), 60000, StockOptions{});
     EXPECT_EQ(r.activityOpens, 1u);
@@ -65,7 +65,7 @@ TEST(JacketHarness, StockR1TwiceOpensAnActivity)
     EXPECT_GT(r.gpsOnMs, 50000u);   // and it keeps searching
 }
 
-TEST(JacketHarness, StockR1FourTimesStartsARecording)
+TEST(JacketHarness, StockSelectFourTimesStartsARecording)
 {
     const auto r = runStock(clicks({ Button::Select, Button::Select, Button::Select, Button::Select }), 60000, StockOptions{});
     EXPECT_EQ(r.recordingsStarted, 1u);
@@ -88,8 +88,7 @@ TEST(JacketHarness, ThePatchedAppsGiveUpAfterTheirBudget)
 
 TEST(JacketHarness, TheDefaultSequenceUnlocksThroughTheFramePacing)
 {
-    const auto ev = paceToFrames(
-        clicks({ Button::Up, Button::Select, Button::Back, Button::Down, Button::Up, Button::Select }, 1000, 450), 10000);
+    const auto ev = paceToFrames(clicks({ Button::Up, Button::Select, Button::Back, Button::Down }, 1000, 450), 10000);
     ButtonLock::UnlockDetector d;
     EXPECT_EQ(countFalseUnlocks(d, ev, 10000), 1u);
 }
@@ -97,7 +96,7 @@ TEST(JacketHarness, TheDefaultSequenceUnlocksThroughTheFramePacing)
 TEST(JacketHarness, AHoldToFinishSequenceUnlocksThroughTheFramePacing)
 {
     ButtonLock::Sequence seq;
-    ASSERT_TRUE(ButtonLock::parseSequence("L1 R1 R2", seq));
+    ASSERT_TRUE(ButtonLock::parseSequence("UP SELECT BACK", seq));
     ButtonLock::UnlockTiming timing;
     timing.finalHoldMs = 1000;
     ButtonLock::UnlockDetector d(seq, timing);
@@ -129,8 +128,10 @@ TEST(JacketHarness, TheEventDrivenLockedRideCountsLikeTheFrameLoop)
     // With no relock window, runLockedRide must decide exactly as the frame
     // loop of countFalseUnlocks does. Weak locks so there is plenty to count.
     ButtonLock::Sequence two, three;
-    ASSERT_TRUE(ButtonLock::parseSequence("L1 R1", two));
-    ASSERT_TRUE(ButtonLock::parseSequence("L1 R1 R2", three));
+    two.length = 2;                                   // shorter than the settings accept
+    two.steps[0] = Button::Up;
+    two.steps[1] = Button::Select;
+    ASSERT_TRUE(ButtonLock::parseSequence("UP SELECT BACK", three));
     ButtonLock::UnlockTiming hold;
     hold.finalHoldMs = 800;
     LockedRideOptions immediate;
@@ -160,12 +161,13 @@ TEST(JacketHarness, TheEventDrivenLockedRideCountsLikeTheFrameLoop)
 
 TEST(JacketHarness, AfterAFalseUnlockTheWatchFaceGetsTheNoiseUntilRelock)
 {
-    // The lock's sequence, then R1 R1 on the watch face (opens an activity),
-    // then the default sequence again long after the relock: the lock is back.
+    // The lock's sequence, then SELECT SELECT on the watch face (opens an
+    // activity): one false unlock, one activity, and the lock back at relock.
+    ButtonLock::UnlockDetector d;
     std::vector<Press> p;
     uint32_t t = 2000;
-    for (Button b : { Button::Up, Button::Select, Button::Back, Button::Down, Button::Up, Button::Select }) {
-        p.push_back(Press{ b, t, t + 100 });
+    for (uint8_t i = 0; i < d.length(); ++i) {
+        p.push_back(Press{ d.sequence()[i], t, t + 100 });
         t += 400;
     }
     p.push_back(Press{ Button::Select, t + 5000, t + 5100 });
@@ -173,7 +175,6 @@ TEST(JacketHarness, AfterAFalseUnlockTheWatchFaceGetsTheNoiseUntilRelock)
     const auto kernel    = toKernelEvents(p, kHour);
     const auto delivered = paceToFrames(kernel, kHour);
 
-    ButtonLock::UnlockDetector d;
     const auto r = runLockedRide(d, delivered, kernel, kHour, LockedRideOptions{}, StockOptions{}, StockOptions{});
     EXPECT_EQ(r.falseUnlocks, 1u);
     EXPECT_EQ(r.stock.activityOpens, 1u);
@@ -200,20 +201,26 @@ class JacketModelTest : public ::testing::TestWithParam<Model>
 {
 };
 
-TEST_P(JacketModelTest, TheDefaultLockSurvivesFiftyHoursOfIt)
+TEST_P(JacketModelTest, TheDefaultLockStaysFarAheadOfIt)
 {
-    // 50 one-hour rides per model, fixed seeds so the test is repeatable.
-    // jacket_report runs the long version and the comparisons.
+    // 200 one-hour rides per model, fixed seeds so the test is repeatable;
+    // jacket_report and seq_study run the long versions. The default lock
+    // averages up to about 21 false unlocks per 1000 h under the harshest
+    // model (docs/sequence-study.md): here at most 6 in 200 h, against the
+    // hundreds of activities the same noise opens on a stock watch. The bound
+    // leaves room for chance, and a broken rule trips it: without the
+    // cool-down, random taps get 13 through and chaos 42.
+    constexpr uint32_t kRides = 200;
     uint32_t unlocks = 0;
     uint32_t opens   = 0;
-    for (uint64_t ride = 0; ride < 50; ++ride) {
+    for (uint64_t ride = 0; ride < kRides; ++ride) {
         Rng rng(0x5EED0000u + ride * 977u + static_cast<uint64_t>(GetParam()));
         const auto kernel = toKernelEvents(generate(GetParam(), rng, kHour), kHour);
         ButtonLock::UnlockDetector d;
         unlocks += countFalseUnlocks(d, paceToFrames(kernel, kHour), kHour);
         opens   += runStock(kernel, kHour, StockOptions{}).activityOpens;
     }
-    EXPECT_EQ(unlocks, 0u) << modelName(GetParam());
+    EXPECT_LE(unlocks, 12u) << modelName(GetParam());
     RecordProperty("stock_activity_opens", static_cast<int>(opens));
 }
 

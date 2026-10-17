@@ -16,7 +16,7 @@ using SDK::AppConfig;
 // SDK's validate_app_config.py --check <app-manifest.json> --check-bounds <this file>.
 const AppConfig::Field kFields[] = {
     // Plain literals only, so the validator can read them: 64 is kSequenceTextMax.
-    AppConfig::stringField("unlockSequence", "UP SELECT BACK DOWN UP SELECT", 5, 64),
+    AppConfig::stringField("unlockSequence", "UP SELECT BACK DOWN", 5, 64),
     AppConfig::intField("relockMinutes", 2, 0, 120),
     AppConfig::boolField("lockAtBoot", true),
     AppConfig::boolField("notificationsWhileLocked", true),
