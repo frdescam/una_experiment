@@ -12,12 +12,13 @@
  *     the same sleeve opens an activity (GPS on) or starts a recording.
  *
  * The stock model is an approximation: the kernel's home screen and launcher
- * are closed source. Its rules come from UNA's quick-start guide (R1 select /
- * start, R2 back, L1 utilities, L2 glances), and the activity app's rules from
- * Examples/Apps/Running (START is the default item; R1 on it starts recording
- * when GPS has a fix, or goes to a confirm screen where R1 starts anyway; the
- * 30 s idle timeout closes the app only when START is not selected). Menu
- * timeouts and the time to a GPS fix are assumptions, set in StockOptions.
+ * are closed source. Its rules come from UNA's quick-start guide (SELECT
+ * select / start, BACK back, UP utilities, DOWN glances), and the activity
+ * app's rules from Examples/Apps/Running (START is the default item; SELECT on
+ * it starts recording when GPS has a fix, or goes to a confirm screen where
+ * SELECT starts anyway; the 30 s idle timeout closes the app only when START
+ * is not selected). Menu timeouts and the time to a GPS fix are assumptions,
+ * set in StockOptions.
  */
 
 #ifndef TESTS_JACKET_MODEL_HPP
@@ -337,8 +338,8 @@ struct StockOptions {
     uint32_t appIdleMs         = 30000;  ///< Running: App::Config::kScreenTimeoutSteps
     uint32_t gpsFixAfterMs     = 60000;  ///< assumed: time to a fix under a sleeve
     uint32_t preActivityBudgetMs = 0;    ///< 0: stock. Otherwise the patched apps' budget (the patch: 5 min)
-    uint32_t holdToStartMs     = 0;      ///< 0: stock (a click starts). Otherwise R1 must be held this long (the patch: 1500)
-    bool     holdAlone         = false;  ///< the hold must be R1 alone: another button cancels or prevents it
+    uint32_t holdToStartMs     = 0;      ///< 0: stock (a click starts). Otherwise SELECT must be held this long (the patch: 1500)
+    bool     holdAlone         = false;  ///< the hold must be SELECT alone: another button cancels or prevents it
 };
 
 struct StockResult {
@@ -402,11 +403,11 @@ inline StockResult runStock(const std::vector<Event>& ev, uint32_t durationMs, c
         }
     };
 
-    // Hold-to-start: the countdown runs from R1's PRESS on a start screen and
-    // fires when it completes with R1 still down, as the stock apps' existing
-    // hold-to-finish screen does.
-    std::array<bool, 4> othersDown = {};   // buttons other than R1 currently down
-    bool     r1Down   = false;   // R1 went down on a start screen and is still down
+    // Hold-to-start: the countdown runs from SELECT's PRESS on a start screen
+    // and fires when it completes with SELECT still down, as the stock apps'
+    // existing hold-to-finish screen does.
+    std::array<bool, 4> othersDown = {};   // buttons other than SELECT currently down
+    bool     r1Down   = false;   // SELECT went down on a start screen and is still down
     uint32_t r1DownAt = 0;
     auto isStartScreen = [&]() { return (s == S::ActPre && sel == 0) || s == S::ActConfirm; };
     auto holdFires = [&](uint32_t upAt) {
@@ -489,7 +490,7 @@ inline StockResult runStock(const std::vector<Event>& ev, uint32_t durationMs, c
                 if (e.b == Button::Back) { enter(S::ActPre, t); }
                 break;
             case S::Recording:
-                // Ending a recording needs R1 held for the hold-to-confirm
+                // Ending a recording needs SELECT held for the hold-to-confirm
                 // countdown, which a click never is: the recording runs on.
                 break;
         }

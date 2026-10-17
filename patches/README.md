@@ -30,12 +30,12 @@ minutes later, no track has started (`mTrackState == INACTIVE && mGpsWanted`), i
 releases the external-HR scan, disconnects and returns from `run()`, which closes
 the app. The pre-activity screens hold nothing unsaved.
 
-**2. Hold to start, alone (GUI).** Ending an activity already needs R1 held
+**2. Hold to start, alone (GUI).** Ending an activity already needs SELECT (R1) held
 through a 1.5 s countdown (`TrackHoldConfirmationView`). Starting needed a
 single click, or two without a fix. Now:
 
 - `HoldConfirmMode` gains `Start`.
-- On the main menu, `R1_PRESS` on START opens the hold screen in Start mode:
+- On the main menu, `R1_PRESS` (SELECT going down) on START opens the hold screen in Start mode:
   green, labelled with the existing "Start" text, so there are no new assets. A
   click on START does nothing.
 - Completing the hold starts the activity and opens the track screen.
@@ -55,11 +55,11 @@ single click, or two without a fix. Now:
 
   | Input on START (GPS fixed) | Stock | Patched |
   |---|---|---|
-  | R1 click | recording | nothing |
-  | R1 held 2.2 s | recording | recording, after the countdown |
-  | R1 held 0.5 s | recording | nothing (back to the menu) |
-  | R1 held, L1 pressed during | recording | nothing (cancelled) |
-  | L1 held, then R1 held | recording | nothing (not begun) |
+  | SELECT click | recording | nothing |
+  | SELECT held 2.2 s | recording | recording, after the countdown |
+  | SELECT held 0.5 s | recording | nothing (back to the menu) |
+  | SELECT held, UP pressed during | recording | nothing (cancelled) |
+  | UP held, then SELECT held | recording | nothing (not begun) |
 
 - The budget, with a temporary 20 s build: `No activity started within 20 s of
   opening: closing`, and `Gps.Loc ... stopped`.
@@ -69,15 +69,15 @@ single click, or two without a fix. Now:
   (one-sided rubbing: 0.49/h). That is why the patch is a second layer behind
   ButtonLock, not a replacement for it.
 
-Not verified on a real watch.
+Not yet run on a real watch.
 
 ## Draft upstream PR
 
 > **fix(apps): don't let a sleeve start an activity, or leave the GNSS searching**
 >
 > On a watch with no touchscreen, a tight sleeve (motorcycle jacket, wetsuit, ski
-> jacket) presses the buttons by itself. From the watch face, R1 R1 opens the
-> first activity, and R1 R1 R1 R1 starts a recording:
+> jacket) presses the buttons by itself. From the watch face, SELECT SELECT opens
+> the first activity, and SELECT four times starts a recording:
 >
 > - Opening Run/Bike/Hike subscribes to `GPS_LOCATION` (`onStartGUI`) to pre-warm
 >   a fix, and nothing releases it until the activity starts or the app exits.
@@ -93,7 +93,7 @@ Not verified on a real watch.
 > 1. **Service:** closes the app when no activity has started 5 minutes after
 >    opening (`skPreActivityBudgetMs`), releasing the GNSS and the strap scan.
 > 2. **GUI:** START is held through the existing hold-to-confirm screen, which
->    gains a `Start` mode. The hold must be R1 alone: another button cancels it.
+>    gains a `Start` mode. The hold must be SELECT alone: another button cancels it.
 >
 > Same change in Running, Cycling and Hiking, no generated code touched. Tested
 > in the TouchGFX simulator (click, hold, early release, squeeze during and before

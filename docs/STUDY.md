@@ -5,8 +5,8 @@ enough, those presses start an activity, and the activity drains the battery.
 
 **Short answer.**
 
-- **Why it happens.** Opening an activity takes two presses of the top-right
-  button from the watch face. Opening it turns the GPS on, and nothing turns it off
+- **Why it happens.** Opening an activity takes two presses of SELECT (the
+  top-right button) from the watch face. Opening it turns the GPS on, and nothing turns it off
   again until START is pressed or the app is left. A third and fourth press start
   recording.
 - **What can't be fixed from an app.** On the watch face the buttons belong to the
@@ -14,18 +14,20 @@ enough, those presses start an activity, and the activity drains the battery.
 - **What an app can do.** It can stay in front of the watch face and take every
   button press itself, which is a lock screen.
 - **What I built.**
-  - **ButtonLock**, a lock-screen app. It shows the time, date and battery, ignores
-    all presses until a deliberate six-step sequence is entered, relocks by
-    itself, comes up locked after a reboot, and warns if the battery is draining
-    behind it.
+  - **ButtonLock** (first called RideLock), a lock-screen app. It shows the time,
+    date and battery, ignores all presses until a deliberate four-press sequence
+    is entered, relocks by itself, comes up locked after a reboot, and warns if
+    the battery is draining behind it.
   - **A patch for the stock Run, Bike and Hike apps.** START needs a 1.5 s hold,
     and an activity opened but never started closes itself after 5 minutes.
 - **How it was checked.** Unit tests, a Monte Carlo model of a cuff pressing
-  buttons, and the SDK's PC simulators. Over 6,000 simulated hours of hostile
-  cuff noise, ButtonLock unlocked by accident **zero** times. The same noise opens
-  an activity about **2–5 times an hour** on a stock watch.
-- **Not yet done.** Nothing has run on a real watch, and §8 lists what that
-  still needs to confirm.
+  buttons, and the SDK's PC simulators. The modelled cuff noise opens an activity
+  about **1–5 times an hour** on a stock watch. Through ButtonLock, the harshest
+  model gets about **20 false unlocks per 1,000 hours**, and about one where the
+  stock watch would open an activity an hour (§6.2,
+  [`sequence-study.md`](sequence-study.md)).
+- **On a real watch.** The first version has run on its wearer's watch, who
+  reports it works well. §8 lists what is still to confirm.
 
 Everything below refers to [UNAWatch/una-sdk](https://github.com/UNAWatch/una-sdk) at
 commit `b5749dc4` (8 Oct 2026), the version this work was built and tested against.
@@ -56,12 +58,15 @@ An activity left running by accident drains the battery about **12 times faster*
 
 There is **no touchscreen**: four buttons do everything.
 
-| Button | Position | Role (official quick-start guide) |
+| Button | Position (SDK name) | Role (official quick-start guide) |
 |---|---|---|
-| L1 | top left | up; from the watch face: utilities |
-| L2 | bottom left | down; from the watch face: glances |
-| R1 | top right | **select / confirm / start / stop**; long press powers on |
-| R2 | bottom right | back / lap |
+| UP | top left (L1) | scroll up; from the watch face: utilities |
+| DOWN | bottom left (L2) | scroll down; from the watch face: glances |
+| SELECT | top right (R1) | **select / confirm / start / stop**; from the watch face: activities; long press powers on |
+| BACK | bottom right (R2) | back / lap |
+
+This document uses UNA's names; the SDK's GUI code names the buttons by
+position.
 
 The hardware design files are published under CC BY 4.0
 ([UNAWatch/una-hardware](https://github.com/UNAWatch/una-hardware)).
@@ -111,16 +116,16 @@ I traced the path in the source of the stock **Run** app
 on every point below.
 
 ```
-watch face ──R1──► activity list ──R1──► Run opens ──R1 on START──► recording
+watch face ─SELECT─► activity list ─SELECT─► Run opens ─SELECT on START─► recording
                                             │                     (with a GPS fix;
                                             │   GPS searching      without one: a
                                             │   from this moment   confirm screen
-                                            ▼                      where R1 starts it)
+                                            ▼                      where SELECT starts it)
                                    idle timeout never fires
                                    while START is selected
 ```
 
-1. **R1 opens the activity list, and R1 again opens the first activity.** That is
+1. **SELECT opens the activity list, and SELECT again opens the first activity.** That is
    two presses of the button nearest the hand.
 2. **Opening the activity turns the GNSS on immediately.** This pre-warms a fix
    for START. In `Software/Libs/Sources/Service.cpp`, `Service::onStartGUI()` does
@@ -142,9 +147,9 @@ watch face ──R1──► activity list ──R1──► Run opens ──R1 
    START is the default item. An activity opened by a sleeve therefore searches
    for satellites until the battery is flat.
 4. **Starting is a single click; stopping is not.** `MainView::onConfirm()` starts
-   the recording on an R1 *click* when there is a fix. Without a fix it goes to a
-   confirm screen where another R1 click starts it. Ending a recording, by
-   contrast, needs R1 *held* through a 1.5 s countdown
+   the recording on a SELECT *click* when there is a fix. Without a fix it goes to a
+   confirm screen where another SELECT click starts it. Ending a recording, by
+   contrast, needs SELECT *held* through a 1.5 s countdown
    (`TrackHoldConfirmationView`). The design protects runners from stopping by
    accident. Nothing protects against starting by accident.
 5. **Moving away does not help.** Whatever else the sleeve does, a suspended
@@ -156,11 +161,11 @@ Run app. The launcher (step 1) belongs to the closed kernel and is not simulated
 - Opening Run starts the GPS.
 - Left on START for 45 s, the app neither times out nor releases the GPS. With
   the cursor moved to Intervals instead, it exits after its 30 s timeout.
-- One R1 click on START starts the recording
+- One SELECT click on START starts the recording
   (`docs/images/activity-patch.png`, first two frames), and the log shows GPS,
   HR, barometer and IMU all starting.
 
-So the drain comes from **three presses of R1**, which leave the GPS searching.
+So the drain comes from **two presses of SELECT**, which leave the GPS searching.
 **Four presses** start a recording.
 
 ## 4. Solution space
@@ -168,7 +173,7 @@ So the drain comes from **three presses of R1**, which leave the GPS searching.
 | # | Option | Effort | Fixes | Downsides |
 |---|---|---|---|---|
 | A | Wear it differently: other wrist, higher on the forearm, over the cuff, or in a pocket | none | sometimes | Loses the watch; a tight cuff may still reach it |
-| B | Power the watch off before riding | none | mostly | A long press of R1 powers it back on, and a cuff can do that |
+| B | Power the watch off before riding | none | mostly | A long press of SELECT powers it back on, and a cuff can do that |
 | C | A 3D-printed button guard (the case is CC BY 4.0) | printer | most presses | Also blocks deliberate presses; fit unknown |
 | D | **A button lock in the firmware** (e.g. hold two buttons) | UNA only | completely | The kernel is closed: needs UNA. A request is drafted in §9 |
 | E | **A lock-screen app**: stay in front, take every press, unlock only with a deliberate sequence | app | yes, while locked | Must be engaged, so it is built to engage itself |
@@ -192,15 +197,18 @@ only when something changes.
 
 ![ButtonLock screens](images/buttonlock-screens.png)
 
-**Unlocking** follows the lit button: **L1 R1 R2 L2 L1 R1**, one and a half laps of
-the case clockwise from the top left. The first press wakes the guide: an amber
-arc beside the next button, and dots for progress. The sequence never has to be
-remembered. The rules that keep a sleeve out live in
+**Unlocking** follows the lit button: **UP SELECT BACK DOWN**, once round the case
+clockwise from the top left. While locked, the arc beside UP is lit; a press wakes
+the guide, which moves the amber arc to the next button and shows dots for
+progress. The sequence never has to be remembered. The first version asked for
+six presses (one and a half laps); [`sequence-study.md`](sequence-study.md) shows
+four hold up across all the noise modelled, at about a second less per unlock.
+The rules that keep a sleeve out live in
 `Software/Libs/Core/ButtonLock/UnlockDetector.*`:
 
 | Rule | What it stops |
 |---|---|
-| **Both sides, no repeats** (enforced on any configured sequence) | A cuff pressing one side; one bouncing button |
+| **At least three different buttons, no repeats** (enforced on any configured sequence) | A cuff pressing one side or rocking across two buttons; one bouncing button |
 | **One button at a time**: any chord ends the attempt | Squeezing the case |
 | **Quiet first**: the first step only counts after 0.6 s without input | A burst that happens to start with the right button |
 | **Brisk**: each press under 1.2 s, next step within 2.5 s | Holds, slow random presses |
@@ -214,14 +222,15 @@ remembered. The rules that keep a sleeve out live in
   grace. A reboot, or a power-on in a sleeve, comes up locked.
 - **Relock**: after an unlock the service stays resident with nothing subscribed,
   and puts the lock back up after `relockMinutes` (default 2).
-- **Opened by hand** from Utilities: locks at once.
+- **Opened by hand** from Utilities: locks at once. From the watch face, UP
+  opens Utilities; scroll to ButtonLock and press SELECT.
 - **Lost or hidden**: if the lock screen is killed, it is relaunched at most once
   per period. If it stays behind another screen (an alarm, or any kernel gesture a
   sleeve might find), it is brought back to the front after the relock period.
 
 **While locked, ButtonLock also:**
 
-- turns off the kernel's L2-hold music control (a hold is what a cuff does);
+- turns off the kernel's DOWN-hold music control (a hold is what a cuff does);
 - keeps phone notifications on (configurable).
 
 **The drain watchdog** (`DrainWatchdog.*`) samples the fuel gauge's current every
@@ -237,7 +246,7 @@ or as `app_config.json` over USB:
 
 | Setting | Default |
 |---|---|
-| `unlockSequence` | `L1 R1 R2 L2 L1 R1` |
+| `unlockSequence` (3–8 steps; L1/R1/R2/L2 also accepted) | `UP SELECT BACK DOWN` |
 | `relockMinutes` (0 = off) | 2 |
 | `lockAtBoot` | true |
 | `notificationsWhileLocked` | true |
@@ -255,7 +264,7 @@ the same range as a watch face, but it has **not been measured** (§8).
 `make_activity_patch.py` applies it to an SDK checkout, and `activity-apps.patch`
 is its output. It makes two changes to each app:
 
-1. **Hold to start, alone.** START now needs **R1 held through the existing 1.5 s
+1. **Hold to start, alone.** START now needs **SELECT held through the existing 1.5 s
    countdown screen**, which gains a Start mode: green, labelled "Start". Releasing
    early returns to the menu. If another button is down when the hold begins, or
    goes down during it (the case squeezed), the hold is cancelled.
@@ -271,12 +280,13 @@ is its output. It makes two changes to each app:
 
 | What | How | Result |
 |---|---|---|
-| Unlock rules, lock policy, watchdog | 71 GoogleTest cases (`tests/`) | all pass |
-| Cuff noise (§6.2) | Monte Carlo, frame-paced exactly like the LVGL port | 0 false unlocks in 6,000 h |
+| Unlock rules, lock policy, watchdog, the model itself | 92 GoogleTest cases (`tests/`) | all pass |
+| Cuff noise (§6.2) | Monte Carlo, frame-paced exactly like the LVGL port | about 20 false unlocks per 1,000 h at worst (below) |
+| Sequence length (§6.3) | `seq_study`, plus an independent implementation | four presses chosen |
 | Lock screen, all states | PC simulator (`simulator/scripts/*.txt`) with scripted kernel events and screenshots | 4/4 scripts pass |
 | Service across launches: boot lock, relock after 1 min, manual open, re-assert when hidden | `ButtonLockServiceHarness` on the SDK's mock kernel, real time | 4/4 scenarios pass; timings within 10 ms |
 | Watch builds | Arm GNU Toolchain 13.3.rel1 + the SDK's packer | `.uapp` for ButtonLock, Run, Bike, Hike |
-| Patched Run: click / hold / early release / squeeze during / squeeze before | SDK's TouchGFX simulator, keys sent under Xvfb | only the uninterrupted hold of R1 alone starts |
+| Patched Run: click / hold / early release / squeeze during / squeeze before | SDK's TouchGFX simulator, keys sent under Xvfb | only the uninterrupted hold of SELECT alone starts |
 | Patched Run: 5-min budget | same simulator, budget shortened to 20 s | "No activity started within 20 s of opening: closing"; GPS stopped |
 | Manifest ↔ field table | the SDK's `validate_app_config.py` | OK; minimum kernel 1.4.0 (ABI 3) |
 
@@ -299,41 +309,69 @@ The noise becomes the kernel's event stream and is fed to two things:
 - a model of the stock menus and Run app. Its rules come from §3; menu timeouts
   and time to fix are assumptions.
 
-1,000 rides per model:
+1,000 rides per model, with the four-press default:
 
 | Jacket model | Stock: activities opened /h | Stock: recordings /h | Stock: GPS on | Patched apps: recordings /h | Patched apps: GPS on | ButtonLock: false unlocks |
 |---|---:|---:|---:|---:|---:|---:|
-| Random taps | 4.8 | 0.96 | 72 % | 0.00 | 14 % | 0 in 1000 h |
+| Random taps | 4.8 | 0.96 | 72 % | 0.00 | 14 % | 19 in 1000 h |
 | One-sided rubbing | 1.4 | 0.49 | 48 % | 0.49 | 44 % | 0 in 1000 h |
-| Road bumps | 2.2 | 1.00 | 93 % | 0.00 | 21 % | 0 in 1000 h |
+| Road bumps | 2.2 | 1.00 | 93 % | 0.00 | 21 % | 15 in 1000 h |
 | Squeezes | 1.8 | 0.25 | 16 % | 0.00 | 4 % | 0 in 1000 h |
-| Pinned + taps | 3.7 | 0.94 | 73 % | 0.00 | 17 % | 0 in 1000 h |
+| Pinned + taps | 3.7 | 0.94 | 73 % | 0.00 | 17 % | 3 in 1000 h |
 | Chaos | 5.3 | 1.00 | 87 % | 0.44 | 34 % | 0 in 1000 h |
 
 The full table with the per-rule ablation is in `docs/jacket-report.md`;
-regenerate it with `build-tests/jacket_report 1000`.
+regenerate it with `build-tests/jacket_report 1000`. A 0 there means below about
+3 per 1,000 h, not never.
 
 What the numbers say:
 
-- **The rules matter more than the length.** The same six steps with none of the
-  rules (a naive lock) fails up to 266 times per 1,000 h (127 under random taps).
-  With the rules, it fails none.
-- **Length and the cool-down matter most.**
-  - With 5 steps: up to 3 false unlocks per 1,000 h. With 4: up to 19.
-  - At 4 steps, every rule shows its value. Removing the cool-down takes chaos
-    from 0 to 192. Removing the quiet rule takes bumps from 15 to 32. Removing
-    the chord rule takes pinned + taps from 3 to 5, and chaos from 0 to 2.
-  - At the 6-step default, only removing the cool-down let anything through
-    (1–2 per 1,000 h).
-- **The default is very robust.** In a separate 10,000 h-per-model run, the
-  default made 3 false unlocks under random taps and 2 under bumps, and none
-  under the other four models. That is about one per 3,000–5,000 hours of the
-  most hostile noise. One-sided noise, which is what a cuff most plausibly makes,
-  never got through.
+- **The rules matter more than the length.** Four presses with none of the rules
+  (a naive lock) fail up to 4,548 times per 1,000 h (1,762 under random taps).
+  With the rules, at most 19.
+- **Each rule earns its place.** At four presses, removing the cool-down takes
+  chaos from 0 to 192 and random taps from 19 to 78. Removing the quiet rule
+  takes bumps from 15 to 32. Removing the chord rule takes pinned + taps from 3
+  to 5.
+- **Length moves everything about tenfold per press.** Random taps: 2,831 at two
+  presses, 236 at three, 19 at four, 1 at five, 0 at six.
+- **One-sided noise, which is what a cuff most plausibly makes, never gets
+  through**, and a code that needs all four buttons cannot be opened by a cuff
+  that reaches only two or three of them, however often it presses.
 - **The patch alone is not enough.** It removes taps, bumps and squeezes as
   causes. But a single-button hold, which a cuff can produce, still completes a
   hold-to-start, so under one-sided rubbing it barely helps. That is why ButtonLock
   is the primary fix and the patch a second layer.
+
+### 6.3 How many presses (`docs/sequence-study.md`)
+
+The first version asked for six presses. That number was chosen to drive these
+hostile models to zero, not because anything required it, and in use six presses
+felt like too many. `tests/seq_study.cpp` measures 124 variants over the same
+models and two more (taps with holds, a cuff rocking across two buttons), at the
+hostile rate and slowed until a stock watch opens about one activity an hour. It
+also counts what the noise does on the watch face in the two minutes before the
+relock, and models a person unlocking with and without gloves. A second,
+independent implementation agrees within about 3 %.
+
+- **Three buttons in the right order is not rare for a cuff.** One try matches a
+  given order 1 time in 64, but a cuff makes hundreds of tries an hour: with no
+  rules, three presses unlock by themselves several times an hour.
+- **With the rules, three presses** unlock about once per 4 h of the harshest
+  noise and once per 70 h at the milder level; **four** about once per 50 h and
+  once per 800 h. Which level is real is exactly what nobody has measured, and
+  four is the length that is fine across the whole range.
+- **Codes on two buttons** (UP SELECT UP, say) are thousands of times weaker: a
+  cuff rocking across two neighbouring buttons opens them. The settings refuse
+  them, and anything under three presses.
+- **A hold on the last button** is no safer than one more tap, since a cuff
+  holds buttons too, and would need an on-screen indicator. It is not offered.
+- **For a person,** four presses take about a second less than six with gloves
+  and fail the first try less often. Under a tight cuff most of the wait is the
+  15 s hands-off pause after the sleeve's own wrong tries, whatever the length.
+
+Four presses, UP SELECT BACK DOWN, is the default. Three (UP SELECT BACK) is a
+reasonable setting for wear without a tight sleeve.
 
 ## 7. Trying it on a watch
 
@@ -352,6 +390,19 @@ need firmware with kernel **1.4.0 or newer** (SDK ABI 3).
 4. Eject safely, then power-cycle the watch. It should come up locked about 5 s
    after booting.
 
+**Coming from RideLock 0.1.0.** Delete its folder (or its `.uapp`) first, and
+install ButtonLock as above. Both carry the same app ID, so the phone app should
+treat ButtonLock as the same app; two copies side by side would both put a lock
+up. An `app_config.json` written for RideLock still works, `L1 R1` names
+included, except that a sequence under three presses or on fewer than three
+buttons now falls back to the default.
+
+**Locking at once.** Open ButtonLock from Utilities: UP from the watch face,
+scroll to it, SELECT. On firmware 1.4.0 the Utilities menu opens on Settings and
+lists apps after "Alerts on" in name order (UP, then DOWN three times, then
+SELECT, with only the stock utilities installed). On 1.5.0 the menu sorts itself
+by use, so ButtonLock should move up as it gets used.
+
 **Calibrating the drain alert.**
 
 1. While locked, the status line shows the averaged current once a few samples are
@@ -369,14 +420,15 @@ backup.
 
 ## 8. What is not known yet (needs the real watch)
 
-Everything was built and tested against the open SDK and its simulators. These
-points depend on the closed kernel or the hardware:
+Everything was built and tested against the open SDK and its simulators. The first
+version has since run on one watch, whose wearer reports that it works well.
+These points depend on the closed kernel or the hardware and are still open:
 
 1. **Does `RequestAppRunGui` really bring ButtonLock in front of an app that is in
    front?** The SDK documents it ("whichever app was on screen is suspended") and
    the Alarm app relies on it, but I could not observe it.
 2. **Are there kernel-level button gestures inside apps?** For example, a long
-   press that returns to the watch face, or a power-off hold. The L2-hold music
+   press that returns to the watch face, or a power-off hold. The DOWN-hold music
    control is the only documented one, and ButtonLock turns it off. Any other would
    suspend the lock, and ButtonLock re-asserts it after the relock period.
 3. **What do buttons do on a notification popup over the lock?** If that worries
@@ -392,27 +444,32 @@ points depend on the closed kernel or the hardware:
    current readout.
 7. **The `Apps/` folder naming** for sideloaded apps, and whether the companion
    app overwrites patched stock apps.
+8. **How hard a real cuff presses.** The sequence length rests on invented noise
+   models. Counting, while locked, how many attempts start and how far noise gets
+   into the code would replace them with a measurement (`sequence-study.md`).
 
 ## 9. Recommendations
 
 1. **Today:** install ButtonLock, keep the defaults, ride, and look at the current
-   readout and the drain alert. If the six-step unlock is too slow, try
-   `L1 R1 R2 L2 L1`: 5 steps, about 1–3 false unlocks per 1,000 h of the worst
-   modelled noise.
+   readout and the drain alert. Without a tight sleeve, `UP SELECT BACK` (three
+   presses) is quicker; under one, keep four.
 2. **Optionally:** install the patched Run/Bike/Hike as a second layer.
-3. **Ask UNA** for a firmware button lock. Draft, for
-   [una-sdk issues](https://github.com/UNAWatch/una-sdk/issues):
+3. **Support UNA's own button lock.** UNA's public
+   [roadmap](https://roadmap.unawatch.com/roadmap) lists a "Button lock" (for
+   layers and thick gloves) as *Design In Progress*. Voting for it, with this use
+   case, is the most direct route to a lock that also covers the watch face.
+   Draft comment:
 
-   > **Feature request: button lock in the kernel.** With no touchscreen, all
-   > input is four buttons, and on the watch face they belong to the kernel. Apps
+   > **Button lock: the motorcycle-jacket case.** With no touchscreen, all input
+   > is four buttons, and on the watch face they belong to the kernel. Apps
    > cannot protect them. In a tight sleeve (motorcycle jacket, wetsuit, ski
-   > jacket) presses happen on their own: R1 R1 opens an activity, whose GNSS then
-   > searches indefinitely (`MainPresenter::onIdleTimeout` never exits on START),
-   > and R1 R1 R1 R1 starts a recording. Please add a kernel button lock (e.g.
-   > hold L1+R2 to lock, the same to unlock, with a padlock on the watch face),
-   > optionally automatic after N minutes of inactivity. A third-party app can
-   > approximate this (github.com/frdescam/una_experiment), but only the kernel
-   > can lock the watch face itself.
+   > jacket) presses happen on their own: SELECT SELECT opens an activity, whose
+   > GNSS then searches indefinitely (`MainPresenter::onIdleTimeout` never exits
+   > on START), and SELECT four times starts a recording. A kernel lock (e.g. hold
+   > UP+BACK to lock, the same to unlock, with a padlock on the watch face),
+   > optionally automatic after N minutes of inactivity, would fix it. A
+   > third-party app can approximate this (github.com/frdescam/una_experiment),
+   > but only the kernel can lock the watch face itself.
 
 4. **Upstream the activity-app fix.** `patches/README.md` has a PR description
    ready. The pre-activity budget is uncontroversial. Hold-to-start changes the
