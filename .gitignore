@@ -9,3 +9,6 @@ apps/ButtonLock/Software/Apps/LVGL-GUI/simulator/build-*/
 
 # The PC simulator's mock file system
 apps/ButtonLock/Software/Output/
+
+# Claude Code worktrees
+.claude/worktrees/
