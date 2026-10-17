@@ -284,7 +284,11 @@ void LockScreen::apply(Outcome outcome, uint32_t now)
         } return;
 
         case Outcome::TooLong:
-            flash("Just tap - no holding", now);
+            flash(mDetector.timing().finalHoldMs > 0 ? "Tap, then hold the last" : "Just tap - no holding", now);
+            return;
+
+        case Outcome::TooShort:
+            flash("Hold the last button", now);
             return;
 
         case Outcome::Chord:

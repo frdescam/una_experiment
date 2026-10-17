@@ -94,6 +94,106 @@ TEST(JacketHarness, TheDefaultSequenceUnlocksThroughTheFramePacing)
     EXPECT_EQ(countFalseUnlocks(d, ev, 10000), 1u);
 }
 
+TEST(JacketHarness, AHoldToFinishSequenceUnlocksThroughTheFramePacing)
+{
+    ButtonLock::Sequence seq;
+    ASSERT_TRUE(ButtonLock::parseSequence("L1 R1 R2", seq));
+    ButtonLock::UnlockTiming timing;
+    timing.finalHoldMs = 1000;
+    ButtonLock::UnlockDetector d(seq, timing);
+
+    const std::vector<Press> p = { Press{ Button::Up, 1000, 1150 }, Press{ Button::Select, 1600, 1750 },
+                                   Press{ Button::Back, 2200, 3400 } };
+    const auto ev = paceToFrames(toKernelEvents(p, 10000), 10000);
+    EXPECT_EQ(countFalseUnlocks(d, ev, 10000), 1u);
+
+    // The same with a click at the end does not unlock.
+    const std::vector<Press> q = { Press{ Button::Up, 1000, 1150 }, Press{ Button::Select, 1600, 1750 },
+                                   Press{ Button::Back, 2200, 2350 } };
+    EXPECT_EQ(countFalseUnlocks(d, paceToFrames(toKernelEvents(q, 10000), 10000), 10000), 0u);
+}
+
+TEST(JacketHarness, TheRateScalesHowOftenNoiseHappens)
+{
+    size_t full = 0, half = 0;
+    for (uint64_t ride = 0; ride < 20; ++ride) {
+        Rng a(ride), b(ride);
+        full += generate(Model::RandomTaps, a, kHour).size();
+        half += generate(Model::RandomTaps, b, kHour, 0.5).size();
+    }
+    EXPECT_NEAR(static_cast<double>(half) / static_cast<double>(full), 0.5, 0.05);
+}
+
+TEST(JacketHarness, TheEventDrivenLockedRideCountsLikeTheFrameLoop)
+{
+    // With no relock window, runLockedRide must decide exactly as the frame
+    // loop of countFalseUnlocks does. Weak locks so there is plenty to count.
+    ButtonLock::Sequence two, three;
+    ASSERT_TRUE(ButtonLock::parseSequence("L1 R1", two));
+    ASSERT_TRUE(ButtonLock::parseSequence("L1 R1 R2", three));
+    ButtonLock::UnlockTiming hold;
+    hold.finalHoldMs = 800;
+    LockedRideOptions immediate;
+    immediate.relockMs   = 0;
+    immediate.handBackMs = 0;
+
+    uint32_t total = 0;
+    for (Model m : kStudyModels) {
+        for (uint64_t ride = 0; ride < 6; ++ride) {
+            Rng rng(0xABCD00u + ride * 31u + static_cast<uint64_t>(m) * 1009u);
+            const auto kernel    = toKernelEvents(generate(m, rng, kHour), kHour);
+            const auto delivered = paceToFrames(kernel, kHour);
+            for (const auto& [seq, timing] : { std::pair{ two, ButtonLock::UnlockTiming{} },
+                                               std::pair{ three, ButtonLock::UnlockTiming{} },
+                                               std::pair{ two, hold } }) {
+                ButtonLock::UnlockDetector a(seq, timing), b(seq, timing);
+                const uint32_t frameLoop = countFalseUnlocks(a, delivered, kHour);
+                const auto     locked    = runLockedRide(b, delivered, kernel, kHour, immediate,
+                                                         StockOptions{}, StockOptions{});
+                EXPECT_EQ(locked.falseUnlocks, frameLoop) << modelName(m) << " ride " << ride;
+                total += frameLoop;
+            }
+        }
+    }
+    EXPECT_GT(total, 50u);    // the comparison had something to compare
+}
+
+TEST(JacketHarness, AfterAFalseUnlockTheWatchFaceGetsTheNoiseUntilRelock)
+{
+    // The lock's sequence, then R1 R1 on the watch face (opens an activity),
+    // then the default sequence again long after the relock: the lock is back.
+    std::vector<Press> p;
+    uint32_t t = 2000;
+    for (Button b : { Button::Up, Button::Select, Button::Back, Button::Down, Button::Up, Button::Select }) {
+        p.push_back(Press{ b, t, t + 100 });
+        t += 400;
+    }
+    p.push_back(Press{ Button::Select, t + 5000, t + 5100 });
+    p.push_back(Press{ Button::Select, t + 6000, t + 6100 });
+    const auto kernel    = toKernelEvents(p, kHour);
+    const auto delivered = paceToFrames(kernel, kHour);
+
+    ButtonLock::UnlockDetector d;
+    const auto r = runLockedRide(d, delivered, kernel, kHour, LockedRideOptions{}, StockOptions{}, StockOptions{});
+    EXPECT_EQ(r.falseUnlocks, 1u);
+    EXPECT_EQ(r.stock.activityOpens, 1u);
+    EXPECT_EQ(r.exposedMs, LockedRideOptions{}.relockMs);
+}
+
+TEST(JacketHarness, RepeatedRejectionsMakeTheLockDeafForAWhile)
+{
+    // Three wrong taps 1 s apart, then silence: cooling down from the third
+    // tap until 15 s after it.
+    std::vector<Press> p = { Press{ Button::Back, 2000, 2100 }, Press{ Button::Back, 3000, 3100 },
+                             Press{ Button::Back, 4000, 4100 } };
+    const auto kernel    = toKernelEvents(p, 60000);
+    const auto delivered = paceToFrames(kernel, 60000);
+    ButtonLock::UnlockDetector d;
+    const auto r = runLockedRide(d, delivered, kernel, 60000, LockedRideOptions{}, StockOptions{}, StockOptions{});
+    EXPECT_EQ(r.falseUnlocks, 0u);
+    EXPECT_NEAR(static_cast<double>(r.deafMs), 15000.0, 300.0);
+}
+
 // --- the result that matters ---------------------------------------------------
 
 class JacketModelTest : public ::testing::TestWithParam<Model>

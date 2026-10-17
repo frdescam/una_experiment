@@ -49,6 +49,10 @@ enum class Model : uint8_t {
     Squeeze,         ///< 2-4 buttons pressed together, held, every ~12 s
     PinnedPlusTaps,  ///< one button pinned for minutes, plus random taps
     Chaos,           ///< taps, holds and chords every ~1.5 s, any button
+    // Extra models for the sequence study (not in kAllModels, so the original
+    // report and tests are unchanged):
+    TapsAndHolds,    ///< random taps every ~6 s, a quarter of them held 0.5-3 s (tests hold-to-finish)
+    Rocker,          ///< bursts of taps rocking across two neighbouring buttons (a row or a column)
 };
 
 inline const char* modelName(Model m)
@@ -60,6 +64,8 @@ inline const char* modelName(Model m)
         case Model::Squeeze:        return "Squeezes (2-4 buttons at once)";
         case Model::PinnedPlusTaps: return "Pinned button + random taps";
         case Model::Chaos:          return "Chaos (taps/holds/chords, 1 per 1.5 s)";
+        case Model::TapsAndHolds:   return "Taps and holds (1 per 6 s, 25% held 0.5-3 s)";
+        case Model::Rocker:         return "Rocker (bursts across 2 neighbouring buttons)";
     }
     return "?";
 }
@@ -67,6 +73,13 @@ inline const char* modelName(Model m)
 inline constexpr std::array<Model, 6> kAllModels = {
     Model::RandomTaps, Model::OneSide, Model::Bumps,
     Model::Squeeze, Model::PinnedPlusTaps, Model::Chaos,
+};
+
+/// The sequence study's models: the six above plus two that probe what the
+/// six cannot (noise that holds buttons on every side; a cuff rocking).
+inline constexpr std::array<Model, 8> kStudyModels = {
+    Model::RandomTaps, Model::OneSide, Model::Bumps, Model::Squeeze,
+    Model::PinnedPlusTaps, Model::Chaos, Model::TapsAndHolds, Model::Rocker,
 };
 
 class Rng
@@ -101,15 +114,24 @@ inline void addTap(std::vector<Press>& out, Button b, uint32_t t, uint32_t held)
     out.push_back(Press{ b, t, t + held });
 }
 
-/// Physical presses for one ride of @p durationMs under @p model.
-inline std::vector<Press> generate(Model model, Rng& rng, uint32_t durationMs)
+/**
+ * @brief Physical presses for one ride of @p durationMs under @p model.
+ *
+ * @p rate scales how often things happen: every interval *between* noise
+ * events (taps, bursts, squeezes, pins) is divided by it, while what happens
+ * inside one event (press lengths, the taps within a burst) is unchanged.
+ * 1.0 is the original, deliberately hostile model; the sequence study lowers
+ * it until the stock watch opens about one activity per hour.
+ */
+inline std::vector<Press> generate(Model model, Rng& rng, uint32_t durationMs, double rate = 1.0)
 {
     std::vector<Press> out;
     uint32_t t = 0;
+    auto gap = [&](double meanMs) { return rng.expMs(meanMs / rate); };
 
     switch (model) {
         case Model::RandomTaps:
-            while ((t += rng.expMs(6000)) < durationMs) {
+            while ((t += gap(6000)) < durationMs) {
                 addTap(out, rng.anyButton(), t, rng.uniformInt(40, 450));
             }
             break;
@@ -118,14 +140,14 @@ inline std::vector<Press> generate(Model model, Rng& rng, uint32_t durationMs)
             const bool right = rng.chance(0.5);
             const Button a = right ? Button::Select : Button::Up;
             const Button b = right ? Button::Back : Button::Down;
-            while ((t += rng.expMs(4000)) < durationMs) {
+            while ((t += gap(4000)) < durationMs) {
                 const uint32_t held = rng.chance(0.2) ? rng.uniformInt(500, 3000) : rng.uniformInt(40, 450);
                 addTap(out, rng.chance(0.5) ? a : b, t, held);
             }
         } break;
 
         case Model::Bumps:
-            while ((t += rng.expMs(15000)) < durationMs) {
+            while ((t += gap(15000)) < durationMs) {
                 const uint32_t n = rng.uniformInt(2, 6);
                 Button b = rng.anyButton();
                 uint32_t bt = t;
@@ -142,7 +164,7 @@ inline std::vector<Press> generate(Model model, Rng& rng, uint32_t durationMs)
             break;
 
         case Model::Squeeze:
-            while ((t += rng.expMs(12000)) < durationMs) {
+            while ((t += gap(12000)) < durationMs) {
                 std::array<Button, 4> all = { Button::Up, Button::Down, Button::Select, Button::Back };
                 for (size_t i = 3; i > 0; --i) {
                     std::swap(all[i], all[rng.uniformInt(0, static_cast<uint32_t>(i))]);
@@ -166,16 +188,16 @@ inline std::vector<Press> generate(Model model, Rng& rng, uint32_t durationMs)
                 const Button b = rng.anyButton();
                 const uint32_t held = rng.uniformInt(30000, 300000);
                 addTap(out, b, p, held);
-                p += held + rng.uniformInt(5000, 60000);
+                p += held + static_cast<uint32_t>(rng.uniformInt(5000, 60000) / rate);
             }
             // ...and random taps on top (presses on a pinned button are dropped later).
-            while ((t += rng.expMs(6000)) < durationMs) {
+            while ((t += gap(6000)) < durationMs) {
                 addTap(out, rng.anyButton(), t, rng.uniformInt(40, 450));
             }
         } break;
 
         case Model::Chaos:
-            while ((t += rng.expMs(1500)) < durationMs) {
+            while ((t += gap(1500)) < durationMs) {
                 const double r = rng.uniform(0.0, 1.0);
                 if (r < 0.6) {
                     addTap(out, rng.anyButton(), t, rng.uniformInt(30, 450));
@@ -192,6 +214,38 @@ inline std::vector<Press> generate(Model model, Rng& rng, uint32_t durationMs)
                 }
             }
             break;
+
+        case Model::TapsAndHolds:
+            while ((t += gap(6000)) < durationMs) {
+                const uint32_t held = rng.chance(0.25) ? rng.uniformInt(500, 3000) : rng.uniformInt(40, 450);
+                addTap(out, rng.anyButton(), t, held);
+            }
+            break;
+
+        case Model::Rocker: {
+            // The cuff's edge sits across two neighbouring buttons (fixed for
+            // the ride): the top row, the bottom row, or one side. Every
+            // ~15 s it rocks: 2-6 taps, alternating with p = 0.8.
+            static constexpr Button kPairs[4][2] = {
+                { Button::Up, Button::Select }, { Button::Down, Button::Back },
+                { Button::Up, Button::Down }, { Button::Select, Button::Back },
+            };
+            const auto& pair = kPairs[rng.uniformInt(0, 3)];
+            while ((t += gap(15000)) < durationMs) {
+                const uint32_t n = rng.uniformInt(2, 6);
+                unsigned k = rng.uniformInt(0, 1);
+                uint32_t bt = t;
+                for (uint32_t i = 0; i < n; ++i) {
+                    const uint32_t held = rng.uniformInt(30, 350);
+                    addTap(out, pair[k], bt, held);
+                    bt += held + rng.uniformInt(60, 500);
+                    if (rng.chance(0.8)) {
+                        k ^= 1u;
+                    }
+                }
+                t = bt;
+            }
+        } break;
     }
     return out;
 }
@@ -444,6 +498,105 @@ inline StockResult runStock(const std::vector<Event>& ev, uint32_t durationMs, c
     holdFires(durationMs);   // a button still pinned at the end of the ride
     settle(durationMs);
     gps(false, durationMs);
+    return r;
+}
+
+// --- A lock that stays down after a false unlock ------------------------------
+
+struct LockedRideOptions {
+    uint32_t relockMs   = 2u * 60u * 1000u;  ///< LockPolicy::relockMs (the lock comes back after this)
+    uint32_t handBackMs = 700;               ///< LockScreen kUnlockedShowMs: the open padlock, then the watch face
+};
+
+struct LockedRideResult {
+    uint32_t    falseUnlocks = 0;
+    uint64_t    exposedMs    = 0;   ///< time the watch face had the buttons
+    uint64_t    deafMs       = 0;   ///< time the lock spent cooling down (a person would be ignored)
+    StockResult stock;              ///< what the same noise did to the stock watch while the lock was down
+    StockResult patched;            ///< the same windows with the patched activity apps
+};
+
+/**
+ * @brief Replays one ride against a lock that, after a false unlock, stays
+ *        down for relockMs while the noise goes on reaching the watch face.
+ *
+ * The lock sees the frame-paced stream (@p delivered); the watch face sees the
+ * kernel stream (@p kernel) of each exposed window, starting at Home, fed to
+ * runStock() with @p stock and with @p patched. The detector is reset when the
+ * lock comes back. Event-driven: poll() runs at each delivered event rather
+ * than every frame, which decides exactly the same (a test checks it against
+ * countFalseUnlocks with relockMs = handBackMs = 0).
+ */
+inline LockedRideResult runLockedRide(ButtonLock::UnlockDetector& d, const std::vector<Event>& delivered,
+                                      const std::vector<Event>& kernel, uint32_t durationMs,
+                                      const LockedRideOptions& lo, const StockOptions& stock,
+                                      const StockOptions& patched)
+{
+    LockedRideResult r;
+    d.reset(0);
+
+    bool     cooling     = false;
+    uint32_t coolStart   = 0;
+    uint32_t coolLastAct = 0;
+    const uint32_t cooldownMs = d.timing().cooldownMs;
+    auto endCooling = [&](uint32_t cap) {
+        const uint32_t end = std::min(coolLastAct + cooldownMs, cap);
+        r.deafMs += end > coolStart ? end - coolStart : 0;
+        cooling = false;
+    };
+
+    std::vector<Event> window;
+    size_t next = 0;
+    while (next < delivered.size()) {
+        const Event& e = delivered[next++];
+        const ButtonLock::Outcome o = d.onInput(e.b, e.in, e.t);
+        d.poll(e.t);
+
+        const bool nowCooling = d.coolingDown();
+        if (!cooling && nowCooling) {
+            cooling   = true;
+            coolStart = coolLastAct = e.t;
+        } else if (cooling && nowCooling) {
+            coolLastAct = e.t;
+        } else if (cooling && !nowCooling) {
+            endCooling(e.t);
+        }
+
+        if (o != ButtonLock::Outcome::Unlocked) {
+            continue;
+        }
+        ++r.falseUnlocks;
+
+        const uint32_t from     = e.t + lo.handBackMs;
+        const uint32_t relockAt = from + lo.relockMs;
+        if (from < durationMs) {
+            const uint32_t to = std::min(relockAt, durationMs);
+            auto first = std::lower_bound(kernel.begin(), kernel.end(), from,
+                                          [](const Event& k, uint32_t v) { return k.t < v; });
+            window.clear();
+            for (auto it = first; it != kernel.end() && it->t < to; ++it) {
+                Event w = *it;
+                w.t -= from;
+                window.push_back(w);
+            }
+            const StockResult s = runStock(window, to - from, stock);
+            r.stock.activityOpens     += s.activityOpens;
+            r.stock.recordingsStarted += s.recordingsStarted;
+            r.stock.gpsOnMs           += s.gpsOnMs;
+            const StockResult p = runStock(window, to - from, patched);
+            r.patched.activityOpens     += p.activityOpens;
+            r.patched.recordingsStarted += p.recordingsStarted;
+            r.patched.gpsOnMs           += p.gpsOnMs;
+            r.exposedMs += to - from;
+        }
+        while (next < delivered.size() && delivered[next].t < relockAt) {
+            ++next;
+        }
+        d.reset(relockAt);
+    }
+    if (cooling) {
+        endCooling(durationMs);
+    }
     return r;
 }
 

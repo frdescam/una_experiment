@@ -15,6 +15,7 @@ bool isRejection(Outcome o)
     switch (o) {
         case Outcome::Wrong:
         case Outcome::TooLong:
+        case Outcome::TooShort:
         case Outcome::Chord:
         case Outcome::Timeout:
         case Outcome::NotQuiet:
@@ -171,11 +172,25 @@ Outcome UnlockDetector::release(unsigned i, uint32_t now)
     }
     mHasCandidate = false;
 
-    if (held > mTiming.maxPressMs) {
-        return reject(Outcome::TooLong, now);
+    const bool rightButton = mSeq.length > 0 && static_cast<unsigned>(mSeq.steps[mProgress]) == i;
+
+    if (!holdDue()) {
+        if (held > mTiming.maxPressMs) {
+            return reject(Outcome::TooLong, now);
+        }
+    } else if (rightButton) {
+        // The final hold: long enough to be deliberate, short enough not to
+        // be a button the sleeve has pinned. (A click-only kernel cannot
+        // hold, so with finalHoldMs set it cannot unlock.)
+        if (held < mTiming.finalHoldMs) {
+            return reject(Outcome::TooShort, now);
+        }
+        if (held >= mTiming.stuckMs) {
+            return reject(Outcome::TooLong, now);
+        }
     }
 
-    if (mSeq.length == 0 || static_cast<unsigned>(mSeq.steps[mProgress]) != i) {
+    if (!rightButton) {
         return reject(Outcome::Wrong, now);
     }
 

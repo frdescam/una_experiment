@@ -300,6 +300,148 @@ TEST_F(UnlockDetectorTest, TheCooldownCanBeSwitchedOff)
     EXPECT_FALSE(d.coolingDown());
 }
 
+// --- hold to finish (UnlockTiming::finalHoldMs) ---------------------------------
+
+namespace
+{
+
+class HoldToFinishTest : public ::testing::Test
+{
+protected:
+    UnlockDetector d;
+    uint32_t       t = 100000;
+
+    void SetUp() override { useSequence("L1 R1 R2", 1000); }
+
+    void useSequence(const char* text, uint32_t holdMs)
+    {
+        Sequence s;
+        ASSERT_TRUE(parseSequence(text, s));
+        UnlockTiming timing;
+        timing.finalHoldMs = holdMs;
+        d.configure(s, timing, 0);
+    }
+
+    /// Tap every step but the last.
+    void tapPrefix()
+    {
+        for (uint8_t i = 0; i + 1 < d.length(); ++i) {
+            ASSERT_EQ(tap(d, d.sequence()[i], t), Outcome::Progress);
+            t += kStep;
+        }
+    }
+};
+
+} // namespace
+
+TEST(UnlockDetectorHold, OffByDefault)
+{
+    UnlockDetector d;
+    EXPECT_EQ(d.timing().finalHoldMs, 0u);
+    EXPECT_FALSE(d.holdDue());
+}
+
+TEST_F(HoldToFinishTest, AHoldOnTheLastButtonUnlocks)
+{
+    tapPrefix();
+    EXPECT_TRUE(d.holdDue());
+    EXPECT_EQ(d.expected(), Button::Back);
+    // Held past the kernel's 500 ms: PRESS ... RELEASE, no CLICK.
+    EXPECT_EQ(down(d, Button::Back, t), Outcome::None);
+    EXPECT_EQ(up(d, Button::Back, t + 1100, 1100), Outcome::Unlocked);
+    EXPECT_TRUE(d.unlocked());
+}
+
+TEST_F(HoldToFinishTest, TwoStepsAndAHold)
+{
+    useSequence("L1 R1", 800);
+    EXPECT_FALSE(d.holdDue());
+    EXPECT_EQ(tap(d, Button::Up, t), Outcome::Progress);
+    EXPECT_TRUE(d.holdDue());
+    EXPECT_EQ(tap(d, Button::Select, t += kStep, 850), Outcome::Unlocked);
+}
+
+TEST_F(HoldToFinishTest, AClickOnTheLastButtonIsTooShort)
+{
+    tapPrefix();
+    EXPECT_EQ(tap(d, Button::Back, t, 120), Outcome::TooShort);   // PRESS, CLICK, RELEASE
+    EXPECT_EQ(d.progress(), 0);
+    EXPECT_FALSE(d.unlocked());
+    EXPECT_TRUE(isRejection(Outcome::TooShort));
+}
+
+TEST_F(HoldToFinishTest, ReleasedJustBeforeTheHoldTimeIsTooShort)
+{
+    tapPrefix();
+    EXPECT_EQ(tap(d, Button::Back, t, 999), Outcome::TooShort);
+    EXPECT_EQ(d.progress(), 0);
+}
+
+TEST_F(HoldToFinishTest, TheMaxPressRuleDoesNotRejectTheHold)
+{
+    tapPrefix();
+    const uint32_t held = d.timing().maxPressMs + 1300;   // 2.5 s
+    EXPECT_EQ(tap(d, Button::Back, t, held), Outcome::Unlocked);
+}
+
+TEST_F(HoldToFinishTest, AHoldOutlastsTheStepGapWithoutTimingOut)
+{
+    tapPrefix();
+    down(d, Button::Back, t);
+    EXPECT_EQ(d.poll(t + d.timing().maxGapMs + 500), Outcome::None);
+    EXPECT_EQ(d.progress(), 2);
+    EXPECT_EQ(up(d, Button::Back, t + 3000, 3000), Outcome::Unlocked);
+}
+
+TEST_F(HoldToFinishTest, AButtonHeldPastStuckMsIsAPinNotAHold)
+{
+    tapPrefix();
+    const uint32_t held = d.timing().stuckMs;
+    EXPECT_EQ(tap(d, Button::Back, t, held), Outcome::TooLong);
+    EXPECT_EQ(d.progress(), 0);
+    EXPECT_FALSE(d.unlocked());
+}
+
+TEST_F(HoldToFinishTest, AnotherButtonDuringTheHoldEndsTheAttempt)
+{
+    tapPrefix();
+    down(d, Button::Back, t);
+    EXPECT_EQ(down(d, Button::Down, t + 600), Outcome::Chord);
+    EXPECT_EQ(d.progress(), 0);
+    EXPECT_EQ(up(d, Button::Down, t + 700, 100), Outcome::None);
+    EXPECT_EQ(up(d, Button::Back, t + 1500, 1500), Outcome::None);   // no longer a step
+    EXPECT_FALSE(d.unlocked());
+}
+
+TEST_F(HoldToFinishTest, APinnedButtonDoesNotSpoilTheHold)
+{
+    down(d, Button::Down, t);                       // the cuff pins L2
+    t += d.timing().stuckMs + 1000;
+    tapPrefix();
+    EXPECT_EQ(tap(d, Button::Back, t, 1200), Outcome::Unlocked);
+}
+
+TEST_F(HoldToFinishTest, EarlierStepsAreStillTaps)
+{
+    EXPECT_EQ(tap(d, Button::Up, t, d.timing().maxPressMs + 1), Outcome::TooLong);
+    EXPECT_EQ(d.progress(), 0);
+}
+
+TEST_F(HoldToFinishTest, AWrongButtonOnTheLastStepIsWrong)
+{
+    tapPrefix();
+    EXPECT_EQ(tap(d, Button::Down, t, 1200), Outcome::Wrong);
+    EXPECT_EQ(d.progress(), 0);
+}
+
+TEST_F(HoldToFinishTest, AClickOnlyKernelCannotFinish)
+{
+    d.onInput(Button::Up, Input::Click, t);
+    d.onInput(Button::Select, Input::Click, t += kStep);
+    EXPECT_EQ(d.onInput(Button::Back, Input::Click, t += kStep), Outcome::TooShort);
+    EXPECT_FALSE(d.unlocked());
+}
+
 TEST(UnlockDetectorRejections, Classification)
 {
     EXPECT_FALSE(isRejection(Outcome::None));
@@ -307,6 +449,7 @@ TEST(UnlockDetectorRejections, Classification)
     EXPECT_FALSE(isRejection(Outcome::Unlocked));
     EXPECT_TRUE(isRejection(Outcome::Wrong));
     EXPECT_TRUE(isRejection(Outcome::TooLong));
+    EXPECT_TRUE(isRejection(Outcome::TooShort));
     EXPECT_TRUE(isRejection(Outcome::Chord));
     EXPECT_TRUE(isRejection(Outcome::Timeout));
     EXPECT_TRUE(isRejection(Outcome::NotQuiet));

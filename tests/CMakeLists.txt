@@ -56,3 +56,9 @@ target_link_libraries(jacket_report PRIVATE buttonlock_core)
 enable_testing()
 include(GoogleTest)
 gtest_discover_tests(buttonlock_tests)
+
+# The unlock-sequence study (prints a Markdown report): seq_study [hostile-h] [calibrated-h] [threads] [seed]
+find_package(Threads REQUIRED)
+add_executable(seq_study seq_study.cpp)
+target_include_directories(seq_study PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(seq_study PRIVATE buttonlock_core Threads::Threads)

@@ -21,6 +21,13 @@
  *   stuck buttons  A button held longer than stuckMs (a cuff pinning it) is
  *                  ignored by the chord rule, so a pinned button cannot lock
  *                  the wearer out.
+ *   hold to finish Optional (finalHoldMs > 0): the last step is not a click
+ *                  but a hold of that button alone, released after at least
+ *                  finalHoldMs and before stuckMs (longer is a pinned button,
+ *                  not a hold). maxPressMs does not apply to it. The kernel
+ *                  sends such a hold as PRESS ... RELEASE with no CLICK; the
+ *                  step completes on the RELEASE. Another button pressed
+ *                  during the hold is a chord and ends the attempt.
  *   cool down      rejectLimit rejected attempts within rejectWindowMs is
  *                  what a sleeve does and a person does not: unlocking then
  *                  pauses until no button has been touched for cooldownMs.
@@ -48,6 +55,8 @@ struct UnlockTiming {
     uint32_t quietMs     = 600;    ///< silence required before the first step
     uint32_t stuckMs     = 4000;   ///< a button down this long is treated as pinned
     uint32_t clickEchoMs = 400;    ///< a CLICK this soon after its RELEASE is the same press
+    uint32_t finalHoldMs = 0;      ///< 0: the last step is a click like the others. Otherwise
+                                   ///< it must be held alone at least this long (and < stuckMs)
 
     uint8_t  rejectLimit    = 3;      ///< rejections that start a cool-down; 0 disables it
     uint32_t rejectWindowMs = 30000;  ///< ...when they fall within this window
@@ -65,7 +74,8 @@ enum class Outcome : uint8_t {
     Progress,   ///< a correct step: progress() went up by one
     Unlocked,   ///< the last step: the sequence is complete
     Wrong,      ///< a step on the wrong button; progress is back to 0
-    TooLong,    ///< a button held past maxPressMs; progress is back to 0
+    TooLong,    ///< a button held past maxPressMs (the final hold: past stuckMs); progress is back to 0
+    TooShort,   ///< the final hold released before finalHoldMs; progress is back to 0
     Chord,      ///< two buttons down at once; progress is back to 0
     Timeout,    ///< too long between steps; progress is back to 0 (from poll())
     NotQuiet,   ///< a first step started too soon after other activity
@@ -104,6 +114,9 @@ public:
     Button   expected() const { return mSeq.steps[mProgress < mSeq.length ? mProgress : 0]; }
     bool     unlocked() const { return mUnlocked; }
     bool     coolingDown() const { return mCoolingDown; }
+
+    /// True when the next step is the final hold (finalHoldMs > 0): a GUI shows "hold".
+    bool     holdDue() const { return mTiming.finalHoldMs > 0 && mProgress + 1u == mSeq.length; }
 
     /// While cooling down: milliseconds of silence still needed.
     uint32_t cooldownRemaining(uint32_t nowMs) const;
