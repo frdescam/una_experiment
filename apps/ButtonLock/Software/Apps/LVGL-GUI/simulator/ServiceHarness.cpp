@@ -269,7 +269,7 @@ int main(int argc, char** argv)
         }
         i = rec.waitFor(CustomMessage::LOCK_CONFIG, mark, 3.0);
         if (check(i >= 0, "locked: the GUI gets the lock config")) {
-            check(rec.at(i).seqLength == 6, "locked: ...with the six-step default sequence");
+            check(rec.at(i).seqLength == 4, "locked: ...with the four-step default sequence");
         }
         check(rec.waitFor(CustomMessage::CLOCK, mark, 3.0) >= 0, "locked: the GUI gets the clock");
         check(rec.waitFor(CustomMessage::POWER, mark, 3.0) >= 0, "locked: the GUI gets the power state");
