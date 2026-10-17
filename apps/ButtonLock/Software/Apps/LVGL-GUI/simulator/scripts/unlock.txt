@@ -1,26 +1,23 @@
 # The wearer unlocks: one wrong press, then the sequence with the guide's help.
+# Idle, the arc beside the first button (UP) is already lit.
 # Screenshots go to $BUTTONLOCK_SIM_SHOTS, or the working directory.
 clock 14 7 4 8 9            # Thu 8 Oct, 14:07
 wait 1500                   # the simulated battery reports in first
 power 87 1.4 0              # (the simulator has no fuel gauge: inject a current)
 wait 300
 shot 01-locked.ppm
-tap SELECT                  # a stray press: wakes the guide, shows where to start
+tap SELECT                  # a stray press: wakes the guide, says where to start
 wait 600
 shot 02-guide.ppm
 wait 1200                   # pause before starting (the quiet rule)
 tap UP
 wait 350
 tap SELECT
-wait 350
-tap BACK
 wait 300
 shot 03-progress.ppm
+tap BACK
+wait 350
 tap DOWN
-wait 350
-tap UP
-wait 350
-tap SELECT
 wait 200
 shot 04-unlocked.ppm
 expect_exit 3000

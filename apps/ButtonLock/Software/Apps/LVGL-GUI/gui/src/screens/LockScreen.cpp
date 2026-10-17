@@ -242,9 +242,8 @@ void LockScreen::onTimer()
 
 void LockScreen::apply(Outcome outcome, uint32_t now)
 {
-    char first[24];
-    std::snprintf(first, sizeof(first), "start from %s",
-                  ButtonLock::buttonName(mDetector.sequence()[0]));
+    // Every message fits the 200 px status line with the longest name, SELECT.
+    const char* first = ButtonLock::buttonName(mDetector.sequence()[0]);
 
     switch (outcome) {
         case Outcome::None:
@@ -279,12 +278,14 @@ void LockScreen::apply(Outcome outcome, uint32_t now)
 
         case Outcome::Wrong: {
             char text[40];
-            std::snprintf(text, sizeof(text), "Wrong button - %s", first);
+            std::snprintf(text, sizeof(text), "Wrong - start from %s", first);
             flash(text, now);
         } return;
 
         case Outcome::TooLong:
-            flash(mDetector.timing().finalHoldMs > 0 ? "Tap, then hold the last" : "Just tap - no holding", now);
+            // With a final hold (an option the settings do not offer), this is
+            // a tap held too long or the hold held past stuckMs.
+            flash(mDetector.timing().finalHoldMs > 0 ? "Taps, then a short hold" : "Just tap - no holding", now);
             return;
 
         case Outcome::TooShort:
@@ -297,13 +298,13 @@ void LockScreen::apply(Outcome outcome, uint32_t now)
 
         case Outcome::Timeout: {
             char text[40];
-            std::snprintf(text, sizeof(text), "Too slow - %s", first);
+            std::snprintf(text, sizeof(text), "Too slow - start from %s", first);
             flash(text, now);
         } return;
 
         case Outcome::NotQuiet: {
             char text[40];
-            std::snprintf(text, sizeof(text), "Pause, then %s", first);
+            std::snprintf(text, sizeof(text), "Pause, then press %s", first);
             flash(text, now);
         } return;
     }
@@ -393,10 +394,13 @@ void LockScreen::renderGuide()
         Draw::setHidden(dot, false);
     }
 
-    // Light the arc beside the button to press next.
+    // Light the arc beside the button to press next. Idle, that is the first
+    // one: a press of any other button would count as a wrong attempt, and a
+    // quick second try as one too soon, which is a cool-down in three
+    // presses. The lit arc gives nothing away to a sleeve.
     using B = SDK::LVGL::Buttons;
     B::Color up = B::NONE, down = B::NONE, select = B::NONE, back = B::NONE;
-    if (mMode == Mode::Entering && length > 0) {
+    if ((mMode == Mode::Entering || mMode == Mode::Idle) && length > 0) {
         switch (mDetector.expected()) {
             case Button::Up:     up     = B::AMBER; break;
             case Button::Down:   down   = B::AMBER; break;

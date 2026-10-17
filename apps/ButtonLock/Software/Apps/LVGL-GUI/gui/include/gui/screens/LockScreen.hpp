@@ -4,11 +4,11 @@
  * @brief   ButtonLock's one screen: a quiet clock face that swallows every
  *          button until the unlock sequence is entered.
  *
- * Idle, it shows a padlock, the time, the date and the battery, and nothing
- * else changes until the next minute. Any button press wakes the guide: the
- * padlock turns amber, dots show how far the sequence has got, and the bezel
- * arc next to the button to press next lights up, so the sequence never has
- * to be memorised. Repeated wrong input (a sleeve) turns the padlock red and
+ * Idle, it shows a padlock, the time, the date and the battery, and the
+ * bezel arc beside the sequence's first button; nothing else changes until
+ * the next minute. A press wakes the guide: the padlock turns amber, dots
+ * show how far the sequence has got, and the arc moves to the button to
+ * press next, so the sequence never has to be memorised. Repeated wrong input (a sleeve) turns the padlock red and
  * pauses unlocking until the buttons have been left alone for a while. When
  * the sequence completes, the padlock opens and the GUI exits, handing the
  * watch back.
@@ -52,7 +52,7 @@ public:
 
 private:
     enum class Mode : uint8_t {
-        Idle,          ///< clock face, nothing lit
+        Idle,          ///< clock face, the first button lit
         Entering,      ///< guide shown: dots and the next button lit
         CoolingDown,   ///< unlocking paused until the buttons are left alone
         Unlocked,      ///< open padlock, about to exit

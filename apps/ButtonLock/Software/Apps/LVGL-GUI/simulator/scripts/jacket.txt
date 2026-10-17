@@ -24,10 +24,6 @@ wait 350
 tap BACK
 wait 350
 tap DOWN
-wait 350
-tap UP
-wait 350
-tap SELECT
 wait 1000
 expect_running
 wait 15500                  # hands off
@@ -39,8 +35,4 @@ wait 350
 tap BACK
 wait 350
 tap DOWN
-wait 350
-tap UP
-wait 350
-tap SELECT
 expect_exit 3000
