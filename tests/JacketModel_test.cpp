@@ -1,11 +1,11 @@
 #include <gtest/gtest.h>
 
 #include "JacketModel.hpp"
-#include "RideLock/UnlockDetector.hpp"
+#include "ButtonLock/UnlockDetector.hpp"
 
 using namespace Jacket;
-using RideLock::Button;
-using RideLock::Input;
+using ButtonLock::Button;
+using ButtonLock::Input;
 
 namespace
 {
@@ -29,7 +29,7 @@ std::vector<Event> clicks(std::initializer_list<Button> buttons, uint32_t t0 = 1
 
 TEST(JacketHarness, KernelEventsFollowTheKernelsOrder)
 {
-    const auto ev = toKernelEvents({ Press{ Button::R1, 100, 200 }, Press{ Button::L1, 1000, 1700 } }, 5000);
+    const auto ev = toKernelEvents({ Press{ Button::Select, 100, 200 }, Press{ Button::Up, 1000, 1700 } }, 5000);
     ASSERT_EQ(ev.size(), 5u);
     EXPECT_EQ(ev[0].in, Input::Press);
     EXPECT_EQ(ev[1].in, Input::Click);     // short press: CLICK then RELEASE
@@ -40,7 +40,7 @@ TEST(JacketHarness, KernelEventsFollowTheKernelsOrder)
 
 TEST(JacketHarness, APressOnAButtonAlreadyDownIsDropped)
 {
-    const auto ev = toKernelEvents({ Press{ Button::R1, 100, 5000 }, Press{ Button::R1, 2000, 2100 } }, 10000);
+    const auto ev = toKernelEvents({ Press{ Button::Select, 100, 5000 }, Press{ Button::Select, 2000, 2100 } }, 10000);
     EXPECT_EQ(ev.size(), 2u);   // PRESS + RELEASE of the long one only
 }
 
@@ -48,7 +48,7 @@ TEST(JacketHarness, FramePacingDeliversOnePerFrameAndDropsTheOldest)
 {
     std::vector<Event> burst;
     for (uint32_t i = 0; i < 20; ++i) {
-        burst.push_back(Event{ 10, Button::L1, Input::Click });
+        burst.push_back(Event{ 10, Button::Up, Input::Click });
     }
     const auto out = paceToFrames(burst, 5000);
     EXPECT_EQ(out.size(), kKeyQueue);
@@ -59,7 +59,7 @@ TEST(JacketHarness, FramePacingDeliversOnePerFrameAndDropsTheOldest)
 
 TEST(JacketHarness, StockR1TwiceOpensAnActivity)
 {
-    const auto r = runStock(clicks({ Button::R1, Button::R1 }), 60000, StockOptions{});
+    const auto r = runStock(clicks({ Button::Select, Button::Select }), 60000, StockOptions{});
     EXPECT_EQ(r.activityOpens, 1u);
     EXPECT_EQ(r.recordingsStarted, 0u);
     EXPECT_GT(r.gpsOnMs, 50000u);   // and it keeps searching
@@ -67,13 +67,13 @@ TEST(JacketHarness, StockR1TwiceOpensAnActivity)
 
 TEST(JacketHarness, StockR1FourTimesStartsARecording)
 {
-    const auto r = runStock(clicks({ Button::R1, Button::R1, Button::R1, Button::R1 }), 60000, StockOptions{});
+    const auto r = runStock(clicks({ Button::Select, Button::Select, Button::Select, Button::Select }), 60000, StockOptions{});
     EXPECT_EQ(r.recordingsStarted, 1u);
 }
 
 TEST(JacketHarness, StockOpenedActivityStaysOnStartForEver)
 {
-    const auto r = runStock(clicks({ Button::R1, Button::R1 }), kHour, StockOptions{});
+    const auto r = runStock(clicks({ Button::Select, Button::Select }), kHour, StockOptions{});
     EXPECT_GT(r.gpsOnMs, kHour - 10000);
 }
 
@@ -81,7 +81,7 @@ TEST(JacketHarness, ThePatchedAppsGiveUpAfterTheirBudget)
 {
     StockOptions o;
     o.preActivityBudgetMs = 5u * 60u * 1000u;
-    const auto r = runStock(clicks({ Button::R1, Button::R1 }), kHour, o);
+    const auto r = runStock(clicks({ Button::Select, Button::Select }), kHour, o);
     EXPECT_EQ(r.activityOpens, 1u);
     EXPECT_LE(r.gpsOnMs, o.preActivityBudgetMs);
 }
@@ -89,8 +89,8 @@ TEST(JacketHarness, ThePatchedAppsGiveUpAfterTheirBudget)
 TEST(JacketHarness, TheDefaultSequenceUnlocksThroughTheFramePacing)
 {
     const auto ev = paceToFrames(
-        clicks({ Button::L1, Button::R1, Button::R2, Button::L2, Button::L1, Button::R1 }, 1000, 450), 10000);
-    RideLock::UnlockDetector d;
+        clicks({ Button::Up, Button::Select, Button::Back, Button::Down, Button::Up, Button::Select }, 1000, 450), 10000);
+    ButtonLock::UnlockDetector d;
     EXPECT_EQ(countFalseUnlocks(d, ev, 10000), 1u);
 }
 
@@ -109,7 +109,7 @@ TEST_P(JacketModelTest, TheDefaultLockSurvivesFiftyHoursOfIt)
     for (uint64_t ride = 0; ride < 50; ++ride) {
         Rng rng(0x5EED0000u + ride * 977u + static_cast<uint64_t>(GetParam()));
         const auto kernel = toKernelEvents(generate(GetParam(), rng, kHour), kHour);
-        RideLock::UnlockDetector d;
+        ButtonLock::UnlockDetector d;
         unlocks += countFalseUnlocks(d, paceToFrames(kernel, kHour), kHour);
         opens   += runStock(kernel, kHour, StockOptions{}).activityOpens;
     }

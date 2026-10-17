@@ -19,20 +19,20 @@ echo "==> Jacket model (200 h per model; docs/jacket-report.md is the 1000 h run
 
 if [ "${1:-}" = "--sim" ]; then
     : "${UNA_SDK:?UNA_SDK is not set: run tools/bootstrap.sh, then source tools/env.sh}"
-    SIM="$ROOT/apps/RideLock/Software/Apps/LVGL-GUI/simulator"
+    SIM="$ROOT/apps/ButtonLock/Software/Apps/LVGL-GUI/simulator"
     echo "==> PC simulator"
     cmake -S "$SIM" -B "$SIM/build-ninja" -G Ninja -DCMAKE_BUILD_TYPE=Debug >/dev/null
     cmake --build "$SIM/build-ninja" >/dev/null
     SHOTS="$(mktemp -d)"
     ( cd "$SIM/build/bin"
       for script in unlock jacket drain chord; do
-          SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy RIDELOCK_SIM_SHOTS="$SHOTS" \
-          RIDELOCK_SIM_SCRIPT="../../scripts/$script.txt" ./RideLockSimulator 2>&1 \
+          SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy BUTTONLOCK_SIM_SHOTS="$SHOTS" \
+          BUTTONLOCK_SIM_SCRIPT="../../scripts/$script.txt" ./ButtonLockSimulator 2>&1 \
               | grep -E "SCRIPT (PASS|FAIL)" | sed "s/^/  $script: /"
       done )
     echo "  screenshots (PPM) in $SHOTS"
     echo "==> Service harness (relock and hidden take about 70 s each)"
     for scenario in noboot manual relock hidden; do
-        "$SIM/build/bin/RideLockServiceHarness" "$scenario" "$(mktemp -d)" | grep -E "^HARNESS (PASS|FAIL)" | sed "s/^/  /"
+        "$SIM/build/bin/ButtonLockServiceHarness" "$scenario" "$(mktemp -d)" | grep -E "^HARNESS (PASS|FAIL)" | sed "s/^/  /"
     done
 fi

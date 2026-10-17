@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
-#include "RideLock/LockController.hpp"
+#include "ButtonLock/LockController.hpp"
 
-using namespace RideLock;
+using namespace ButtonLock;
 
 namespace
 {

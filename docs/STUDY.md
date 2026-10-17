@@ -14,7 +14,7 @@ enough, those presses start an activity, and the activity drains the battery.
 - **What an app can do.** It can stay in front of the watch face and take every
   button press itself, which is a lock screen.
 - **What I built.**
-  - **RideLock**, a lock-screen app. It shows the time, date and battery, ignores
+  - **ButtonLock**, a lock-screen app. It shows the time, date and battery, ignores
     all presses until a deliberate six-step sequence is entered, relocks by
     itself, comes up locked after a reboot, and warns if the battery is draining
     behind it.
@@ -22,7 +22,7 @@ enough, those presses start an activity, and the activity drains the battery.
     and an activity opened but never started closes itself after 5 minutes.
 - **How it was checked.** Unit tests, a Monte Carlo model of a cuff pressing
   buttons, and the SDK's PC simulators. Over 6,000 simulated hours of hostile
-  cuff noise, RideLock unlocked by accident **zero** times. The same noise opens
+  cuff noise, ButtonLock unlocked by accident **zero** times. The same noise opens
   an activity about **2–5 times an hour** on a stock watch.
 - **Not yet done.** Nothing has run on a real watch, and §8 lists what that
   still needs to confirm.
@@ -177,26 +177,26 @@ So the drain comes from **three presses of R1**, which leave the GPS searching.
 
 D is the proper fix, but it is not ours to make. **E, F and G can be built today,
 and they complement each other.** The experiment builds all three: E and G in one
-app (RideLock), and F as a patch to the stock apps.
+app (ButtonLock), and F as a patch to the stock apps.
 
 ## 5. The experiment
 
-### 5.1 RideLock (`apps/RideLock`)
+### 5.1 ButtonLock (`apps/ButtonLock`)
 
 A Utility app (service plus LVGL GUI) built with `APP_AUTOSTART`.
 
 **While locked**, its GUI is in front of everything. The buttons therefore reach
-RideLock, never the launcher or an activity. The screen works as a watch face:
+ButtonLock, never the launcher or an activity. The screen works as a watch face:
 padlock, time, date, battery and (optionally) the measured current. It redraws
 only when something changes.
 
-![RideLock screens](images/ridelock-screens.png)
+![ButtonLock screens](images/buttonlock-screens.png)
 
 **Unlocking** follows the lit button: **L1 R1 R2 L2 L1 R1**, one and a half laps of
 the case clockwise from the top left. The first press wakes the guide: an amber
 arc beside the next button, and dots for progress. The sequence never has to be
 remembered. The rules that keep a sleeve out live in
-`Software/Libs/Core/RideLock/UnlockDetector.*`:
+`Software/Libs/Core/ButtonLock/UnlockDetector.*`:
 
 | Rule | What it stops |
 |---|---|
@@ -219,7 +219,7 @@ remembered. The rules that keep a sleeve out live in
   per period. If it stays behind another screen (an alarm, or any kernel gesture a
   sleeve might find), it is brought back to the front after the relock period.
 
-**While locked, RideLock also:**
+**While locked, ButtonLock also:**
 
 - turns off the kernel's L2-hold music control (a hold is what a cuff does);
 - keeps phone notifications on (configurable).
@@ -274,8 +274,8 @@ is its output. It makes two changes to each app:
 | Unlock rules, lock policy, watchdog | 71 GoogleTest cases (`tests/`) | all pass |
 | Cuff noise (§6.2) | Monte Carlo, frame-paced exactly like the LVGL port | 0 false unlocks in 6,000 h |
 | Lock screen, all states | PC simulator (`simulator/scripts/*.txt`) with scripted kernel events and screenshots | 4/4 scripts pass |
-| Service across launches: boot lock, relock after 1 min, manual open, re-assert when hidden | `RideLockServiceHarness` on the SDK's mock kernel, real time | 4/4 scenarios pass; timings within 10 ms |
-| Watch builds | Arm GNU Toolchain 13.3.rel1 + the SDK's packer | `.uapp` for RideLock, Run, Bike, Hike |
+| Service across launches: boot lock, relock after 1 min, manual open, re-assert when hidden | `ButtonLockServiceHarness` on the SDK's mock kernel, real time | 4/4 scenarios pass; timings within 10 ms |
+| Watch builds | Arm GNU Toolchain 13.3.rel1 + the SDK's packer | `.uapp` for ButtonLock, Run, Bike, Hike |
 | Patched Run: click / hold / early release / squeeze during / squeeze before | SDK's TouchGFX simulator, keys sent under Xvfb | only the uninterrupted hold of R1 alone starts |
 | Patched Run: 5-min budget | same simulator, budget shortened to 20 s | "No activity started within 20 s of opening: closing"; GPS stopped |
 | Manifest ↔ field table | the SDK's `validate_app_config.py` | OK; minimum kernel 1.4.0 (ABI 3) |
@@ -294,14 +294,14 @@ deliberately hostile kinds of noise. Each simulated ride is an hour long:
 
 The noise becomes the kernel's event stream and is fed to two things:
 
-- RideLock, one code per 10 Hz frame through the port's 16-deep queue (as the
+- ButtonLock, one code per 10 Hz frame through the port's 16-deep queue (as the
   real `GuiCommandProcessor` does);
 - a model of the stock menus and Run app. Its rules come from §3; menu timeouts
   and time to fix are assumptions.
 
 1,000 rides per model:
 
-| Jacket model | Stock: activities opened /h | Stock: recordings /h | Stock: GPS on | Patched apps: recordings /h | Patched apps: GPS on | RideLock: false unlocks |
+| Jacket model | Stock: activities opened /h | Stock: recordings /h | Stock: GPS on | Patched apps: recordings /h | Patched apps: GPS on | ButtonLock: false unlocks |
 |---|---:|---:|---:|---:|---:|---:|
 | Random taps | 4.8 | 0.96 | 72 % | 0.00 | 14 % | 0 in 1000 h |
 | One-sided rubbing | 1.4 | 0.49 | 48 % | 0.49 | 44 % | 0 in 1000 h |
@@ -332,7 +332,7 @@ What the numbers say:
   never got through.
 - **The patch alone is not enough.** It removes taps, bumps and squeezes as
   causes. But a single-button hold, which a cuff can produce, still completes a
-  hold-to-start, so under one-sided rubbing it barely helps. That is why RideLock
+  hold-to-start, so under one-sided rubbing it barely helps. That is why ButtonLock
   is the primary fix and the patch a second layer.
 
 ## 7. Trying it on a watch
@@ -341,13 +341,13 @@ Prebuilt files are in `dist/` (see `dist/SHA256SUMS`), or build them with
 `tools/bootstrap.sh && source tools/env.sh && tools/build.sh --activity`. The apps
 need firmware with kernel **1.4.0 or newer** (SDK ABI 3).
 
-**RideLock only (recommended first).**
+**ButtonLock only (recommended first).**
 
 1. Connect the watch by USB and wait for its drive.
-2. In `Apps/`, create a folder `RideLock` and copy `RideLock_0.1.0.uapp` into it.
+2. In `Apps/`, create a folder `ButtonLock` and copy `ButtonLock_0.2.0.uapp` into it.
    (UNA's docs use the app name; one third-party guide uses the APP_ID
    `5CBC53B94083EF7D`. If the app does not appear, try that.)
-3. Optional: copy `apps/RideLock/Output/app_config.example.json` to the same
+3. Optional: copy `apps/ButtonLock/Output/app_config.example.json` to the same
    folder as `app_config.json` and edit it.
 4. Eject safely, then power-cycle the watch. It should come up locked about 5 s
    after booting.
@@ -363,7 +363,7 @@ need firmware with kernel **1.4.0 or newer** (SDK ABI 3).
 
 **The patched Run/Bike/Hike (optional).** Over USB, find the folder holding the
 stock `Running_*.uapp` (and `Cycling`/`Hiking`). **Move the original to your
-computer as a backup** and put the `_1.5.0-ridelock` file in its place. The phone
+computer as a backup** and put the `_1.5.0-holdstart` file in its place. The phone
 app may later "update" it back to the stock version. To revert, restore the
 backup.
 
@@ -372,20 +372,20 @@ backup.
 Everything was built and tested against the open SDK and its simulators. These
 points depend on the closed kernel or the hardware:
 
-1. **Does `RequestAppRunGui` really bring RideLock in front of an app that is in
+1. **Does `RequestAppRunGui` really bring ButtonLock in front of an app that is in
    front?** The SDK documents it ("whichever app was on screen is suspended") and
    the Alarm app relies on it, but I could not observe it.
 2. **Are there kernel-level button gestures inside apps?** For example, a long
    press that returns to the watch face, or a power-off hold. The L2-hold music
-   control is the only documented one, and RideLock turns it off. Any other would
-   suspend the lock, and RideLock re-asserts it after the relock period.
+   control is the only documented one, and ButtonLock turns it off. Any other would
+   suspend the lock, and ButtonLock re-asserts it after the relock period.
 3. **What do buttons do on a notification popup over the lock?** If that worries
    you, set `notificationsWhileLocked` to false.
 4. **`BATTERY_METRICS` on real hardware**: its availability to third-party apps,
    the sign and units of `AVERAGE_CURRENT`, and its update rate. The activity apps
    subscribe to it, which suggests it is available. The watchdog uses the
    magnitude, and the screen shows it, to check.
-5. **Real power cost** of RideLock while locked (ticks, the minute redraw, the
+5. **Real power cost** of ButtonLock while locked (ticks, the minute redraw, the
    gauge reading), compared with the stock watch face.
 6. **Whether the kernel lights the backlight on every button press.** A cuff
    pressing all ride long would then also cost backlight. Measurable with the
@@ -395,7 +395,7 @@ points depend on the closed kernel or the hardware:
 
 ## 9. Recommendations
 
-1. **Today:** install RideLock, keep the defaults, ride, and look at the current
+1. **Today:** install ButtonLock, keep the defaults, ride, and look at the current
    readout and the drain alert. If the six-step unlock is too slow, try
    `L1 R1 R2 L2 L1`: 5 steps, about 1–3 false unlocks per 1,000 h of the worst
    modelled noise.

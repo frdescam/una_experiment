@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
 
 #include "KernelEvents.hpp"
-#include "RideLock/UnlockDetector.hpp"
+#include "ButtonLock/UnlockDetector.hpp"
 
-using namespace RideLock;
+using namespace ButtonLock;
 using TestSupport::tap;
 using TestSupport::down;
 using TestSupport::up;
@@ -45,27 +45,27 @@ TEST_F(UnlockDetectorTest, TheSequenceUnlocks)
 TEST_F(UnlockDetectorTest, EachCorrectStepReportsProgressAndTheNextButton)
 {
     EXPECT_EQ(d.length(), 6);
-    EXPECT_EQ(d.expected(), Button::L1);
-    EXPECT_EQ(tap(d, Button::L1, t), Outcome::Progress);
+    EXPECT_EQ(d.expected(), Button::Up);
+    EXPECT_EQ(tap(d, Button::Up, t), Outcome::Progress);
     EXPECT_EQ(d.progress(), 1);
-    EXPECT_EQ(d.expected(), Button::R1);
-    EXPECT_EQ(tap(d, Button::R1, t += kStep), Outcome::Progress);
-    EXPECT_EQ(tap(d, Button::R2, t += kStep), Outcome::Progress);
+    EXPECT_EQ(d.expected(), Button::Select);
+    EXPECT_EQ(tap(d, Button::Select, t += kStep), Outcome::Progress);
+    EXPECT_EQ(tap(d, Button::Back, t += kStep), Outcome::Progress);
     EXPECT_EQ(d.progress(), 3);
-    EXPECT_EQ(d.expected(), Button::L2);
-    EXPECT_EQ(tap(d, Button::L2, t += kStep), Outcome::Progress);
-    EXPECT_EQ(tap(d, Button::L1, t += kStep), Outcome::Progress);
-    EXPECT_EQ(d.expected(), Button::R1);
-    EXPECT_EQ(tap(d, Button::R1, t += kStep), Outcome::Unlocked);
+    EXPECT_EQ(d.expected(), Button::Down);
+    EXPECT_EQ(tap(d, Button::Down, t += kStep), Outcome::Progress);
+    EXPECT_EQ(tap(d, Button::Up, t += kStep), Outcome::Progress);
+    EXPECT_EQ(d.expected(), Button::Select);
+    EXPECT_EQ(tap(d, Button::Select, t += kStep), Outcome::Unlocked);
 }
 
 TEST_F(UnlockDetectorTest, AWrongButtonStartsAgain)
 {
-    tap(d, Button::L1, t);
-    tap(d, Button::R1, t += kStep);
-    tap(d, Button::R2, t += kStep);
-    tap(d, Button::L2, t += kStep);
-    EXPECT_EQ(tap(d, Button::R1, t += kStep), Outcome::Wrong);   // L1 was due
+    tap(d, Button::Up, t);
+    tap(d, Button::Select, t += kStep);
+    tap(d, Button::Back, t += kStep);
+    tap(d, Button::Down, t += kStep);
+    EXPECT_EQ(tap(d, Button::Select, t += kStep), Outcome::Wrong);   // L1 was due
     EXPECT_EQ(d.progress(), 0);
     EXPECT_FALSE(d.unlocked());
 }
@@ -73,8 +73,8 @@ TEST_F(UnlockDetectorTest, AWrongButtonStartsAgain)
 TEST_F(UnlockDetectorTest, TheFirstStepNeedsAQuietMoment)
 {
     // A wrong press, then the right first button straight after: refused.
-    EXPECT_EQ(tap(d, Button::R2, t), Outcome::Wrong);
-    EXPECT_EQ(tap(d, Button::L1, t += 300), Outcome::NotQuiet);
+    EXPECT_EQ(tap(d, Button::Back, t), Outcome::Wrong);
+    EXPECT_EQ(tap(d, Button::Up, t += 300), Outcome::NotQuiet);
     EXPECT_EQ(d.progress(), 0);
 
     // After a pause the same press starts the sequence.
@@ -85,52 +85,52 @@ TEST_F(UnlockDetectorTest, TheFirstStepNeedsAQuietMoment)
 TEST_F(UnlockDetectorTest, QuietIsMeasuredFromTheLastRelease)
 {
     // A long rub on R2 ends; the first step must wait quietMs after the release.
-    down(d, Button::R2, t);
-    up(d, Button::R2, t + 3000, 3000);
+    down(d, Button::Back, t);
+    up(d, Button::Back, t + 3000, 3000);
     t += 3000 + 200;
-    EXPECT_EQ(tap(d, Button::L1, t), Outcome::NotQuiet);
+    EXPECT_EQ(tap(d, Button::Up, t), Outcome::NotQuiet);
 }
 
 TEST_F(UnlockDetectorTest, LaterStepsDoNotNeedQuiet)
 {
     // Brisk entry: 150 ms between steps is fine once the attempt has started.
-    EXPECT_EQ(tap(d, Button::L1, t, 80), Outcome::Progress);
-    EXPECT_EQ(tap(d, Button::R1, t += 150, 80), Outcome::Progress);
-    EXPECT_EQ(tap(d, Button::R2, t += 150, 80), Outcome::Progress);
-    EXPECT_EQ(tap(d, Button::L2, t += 150, 80), Outcome::Progress);
-    EXPECT_EQ(tap(d, Button::L1, t += 150, 80), Outcome::Progress);
-    EXPECT_EQ(tap(d, Button::R1, t += 150, 80), Outcome::Unlocked);
+    EXPECT_EQ(tap(d, Button::Up, t, 80), Outcome::Progress);
+    EXPECT_EQ(tap(d, Button::Select, t += 150, 80), Outcome::Progress);
+    EXPECT_EQ(tap(d, Button::Back, t += 150, 80), Outcome::Progress);
+    EXPECT_EQ(tap(d, Button::Down, t += 150, 80), Outcome::Progress);
+    EXPECT_EQ(tap(d, Button::Up, t += 150, 80), Outcome::Progress);
+    EXPECT_EQ(tap(d, Button::Select, t += 150, 80), Outcome::Unlocked);
 }
 
 TEST_F(UnlockDetectorTest, TwoButtonsAtOnceIsAChord)
 {
-    tap(d, Button::L1, t);
+    tap(d, Button::Up, t);
     t += kStep;
-    down(d, Button::R1, t);
-    EXPECT_EQ(down(d, Button::R2, t + 50), Outcome::Chord);
+    down(d, Button::Select, t);
+    EXPECT_EQ(down(d, Button::Back, t + 50), Outcome::Chord);
     EXPECT_EQ(d.progress(), 0);
     // Neither release can complete a step.
-    EXPECT_EQ(up(d, Button::R1, t + 100, 100), Outcome::None);
-    EXPECT_EQ(up(d, Button::R2, t + 120, 70), Outcome::None);
+    EXPECT_EQ(up(d, Button::Select, t + 100, 100), Outcome::None);
+    EXPECT_EQ(up(d, Button::Back, t + 120, 70), Outcome::None);
     EXPECT_EQ(d.progress(), 0);
 }
 
 TEST_F(UnlockDetectorTest, AHoldIsNotAStep)
 {
-    EXPECT_EQ(tap(d, Button::L1, t, d.timing().maxPressMs + 1), Outcome::TooLong);
+    EXPECT_EQ(tap(d, Button::Up, t, d.timing().maxPressMs + 1), Outcome::TooLong);
     EXPECT_EQ(d.progress(), 0);
 }
 
 TEST_F(UnlockDetectorTest, AGloveSlowPressStillCounts)
 {
     // Slower than the kernel's 500 ms click: no CLICK, only PRESS/RELEASE.
-    EXPECT_EQ(tap(d, Button::L1, t, 900), Outcome::Progress);
+    EXPECT_EQ(tap(d, Button::Up, t, 900), Outcome::Progress);
 }
 
 TEST_F(UnlockDetectorTest, AnAbandonedAttemptTimesOut)
 {
-    tap(d, Button::L1, t);
-    tap(d, Button::R1, t += kStep);
+    tap(d, Button::Up, t);
+    tap(d, Button::Select, t += kStep);
     EXPECT_EQ(d.poll(t + 1000), Outcome::None);
     EXPECT_EQ(d.poll(t + 120 + d.timing().maxGapMs + 1), Outcome::Timeout);
     EXPECT_EQ(d.progress(), 0);
@@ -139,10 +139,10 @@ TEST_F(UnlockDetectorTest, AnAbandonedAttemptTimesOut)
 
 TEST_F(UnlockDetectorTest, ALateStepStartsAFreshAttemptEvenWithoutPoll)
 {
-    tap(d, Button::L1, t);
+    tap(d, Button::Up, t);
     t += 120 + d.timing().maxGapMs + 100;
     // Too late for step two; but quiet enough to be a new step one.
-    EXPECT_EQ(tap(d, Button::L1, t), Outcome::Progress);
+    EXPECT_EQ(tap(d, Button::Up, t), Outcome::Progress);
     EXPECT_EQ(d.progress(), 1);
 }
 
@@ -153,16 +153,16 @@ TEST_F(UnlockDetectorTest, APinnedButtonDoesNotLockTheWearerOut)
     d.configure(s, UnlockTiming{}, 0);
 
     // The cuff pins R2 down for good.
-    down(d, Button::R2, t);
+    down(d, Button::Back, t);
 
     // While it is fresh, any other press is a chord.
-    EXPECT_EQ(down(d, Button::L1, t + 500), Outcome::Chord);
-    up(d, Button::L1, t + 600, 100);
+    EXPECT_EQ(down(d, Button::Up, t + 500), Outcome::Chord);
+    up(d, Button::Up, t + 600, 100);
 
     // Once it has been down past stuckMs it is ignored.
     t += d.timing().stuckMs + 1000;
-    EXPECT_EQ(tap(d, Button::L1, t), Outcome::Progress);
-    EXPECT_EQ(tap(d, Button::R1, t + kStep), Outcome::Unlocked);
+    EXPECT_EQ(tap(d, Button::Up, t), Outcome::Progress);
+    EXPECT_EQ(tap(d, Button::Select, t + kStep), Outcome::Unlocked);
 }
 
 TEST_F(UnlockDetectorTest, AKernelThatOnlySendsClicksStillWorks)
@@ -180,22 +180,22 @@ TEST_F(UnlockDetectorTest, AClickArrivingAfterItsReleaseIsNotASecondStep)
 {
     // Some ports deliver PRESS, RELEASE, CLICK. The late CLICK must not count
     // again (that would be "L1 L1" and a Wrong).
-    EXPECT_EQ(down(d, Button::L1, t), Outcome::None);
-    EXPECT_EQ(d.onInput(Button::L1, Input::Release, t + 100), Outcome::Progress);
-    EXPECT_EQ(d.onInput(Button::L1, Input::Click, t + 200), Outcome::None);
+    EXPECT_EQ(down(d, Button::Up, t), Outcome::None);
+    EXPECT_EQ(d.onInput(Button::Up, Input::Release, t + 100), Outcome::Progress);
+    EXPECT_EQ(d.onInput(Button::Up, Input::Click, t + 200), Outcome::None);
     EXPECT_EQ(d.progress(), 1);
 }
 
 TEST_F(UnlockDetectorTest, AReleaseWithoutAPressIsIgnored)
 {
-    EXPECT_EQ(d.onInput(Button::L1, Input::Release, t), Outcome::None);
+    EXPECT_EQ(d.onInput(Button::Up, Input::Release, t), Outcome::None);
     EXPECT_EQ(d.progress(), 0);
 }
 
 TEST_F(UnlockDetectorTest, NothingCountsOnceUnlockedUntilReset)
 {
     ASSERT_EQ(enterDefault(), Outcome::Unlocked);
-    EXPECT_EQ(tap(d, Button::R2, t += 5000), Outcome::None);
+    EXPECT_EQ(tap(d, Button::Back, t += 5000), Outcome::None);
     EXPECT_TRUE(d.unlocked());
 
     d.reset(t);
@@ -205,10 +205,10 @@ TEST_F(UnlockDetectorTest, NothingCountsOnceUnlockedUntilReset)
 
 TEST_F(UnlockDetectorTest, ResetForgetsHeldButtonsAndRestartsTheQuietPeriod)
 {
-    down(d, Button::R1, t);         // its release is lost while the screen was away
+    down(d, Button::Select, t);         // its release is lost while the screen was away
     d.reset(t + 100);
     // Too soon after the reset to start.
-    EXPECT_EQ(tap(d, Button::L1, t + 300), Outcome::NotQuiet);
+    EXPECT_EQ(tap(d, Button::Up, t + 300), Outcome::NotQuiet);
     // Later, and no chord with the forgotten R1.
     t += 100 + 300 + 120 + d.timing().quietMs;
     EXPECT_EQ(enterDefault(), Outcome::Unlocked);
@@ -224,9 +224,9 @@ TEST_F(UnlockDetectorTest, SurvivesTheTickCounterWrapping)
 TEST_F(UnlockDetectorTest, RepeatedRejectionsPauseUnlocking)
 {
     // Three wrong presses in a few seconds: a sleeve, not a person.
-    EXPECT_EQ(tap(d, Button::R2, t), Outcome::Wrong);
-    EXPECT_EQ(tap(d, Button::R1, t += 1000), Outcome::Wrong);
-    EXPECT_EQ(tap(d, Button::L2, t += 1000), Outcome::CoolingDown);
+    EXPECT_EQ(tap(d, Button::Back, t), Outcome::Wrong);
+    EXPECT_EQ(tap(d, Button::Select, t += 1000), Outcome::Wrong);
+    EXPECT_EQ(tap(d, Button::Down, t += 1000), Outcome::CoolingDown);
     EXPECT_TRUE(d.coolingDown());
 
     // Now even the right sequence does nothing.
@@ -248,28 +248,28 @@ TEST_F(UnlockDetectorTest, RepeatedRejectionsPauseUnlocking)
 
 TEST_F(UnlockDetectorTest, TouchingAButtonRestartsTheCooldown)
 {
-    tap(d, Button::R2, t);
-    tap(d, Button::R2, t += 1000);
-    ASSERT_EQ(tap(d, Button::R2, t += 1000), Outcome::CoolingDown);
+    tap(d, Button::Back, t);
+    tap(d, Button::Back, t += 1000);
+    ASSERT_EQ(tap(d, Button::Back, t += 1000), Outcome::CoolingDown);
 
     // Every bump restarts the silence clock.
     for (int i = 0; i < 5; ++i) {
         t += d.timing().cooldownMs - 2000;
         EXPECT_EQ(d.poll(t), Outcome::None);
-        EXPECT_EQ(tap(d, Button::R1, t), Outcome::CoolingDown);
+        EXPECT_EQ(tap(d, Button::Select, t), Outcome::CoolingDown);
     }
     EXPECT_TRUE(d.coolingDown());
 
     // A first press after enough silence ends the pause and counts as a step.
     t += 120 + d.timing().cooldownMs;
-    EXPECT_EQ(tap(d, Button::L1, t), Outcome::Progress);
+    EXPECT_EQ(tap(d, Button::Up, t), Outcome::Progress);
     EXPECT_FALSE(d.coolingDown());
 }
 
 TEST_F(UnlockDetectorTest, RejectionsFarApartDoNotPause)
 {
     for (int i = 0; i < 10; ++i) {
-        EXPECT_EQ(tap(d, Button::R2, t), Outcome::Wrong) << i;
+        EXPECT_EQ(tap(d, Button::Back, t), Outcome::Wrong) << i;
         t += d.timing().rejectWindowMs / 2 + 1000;
     }
     EXPECT_FALSE(d.coolingDown());
@@ -279,7 +279,7 @@ TEST_F(UnlockDetectorTest, RejectionsFarApartDoNotPause)
 TEST_F(UnlockDetectorTest, GivingUpHalfWayIsNotCountedAsNoise)
 {
     for (int i = 0; i < 5; ++i) {
-        tap(d, Button::L1, t);
+        tap(d, Button::Up, t);
         t += 120 + d.timing().maxGapMs + 1;
         EXPECT_EQ(d.poll(t), Outcome::Timeout);
         t += 1000;
@@ -294,7 +294,7 @@ TEST_F(UnlockDetectorTest, TheCooldownCanBeSwitchedOff)
     d.configure(defaultSequence(), timing, t);
     t += 1000;
     for (int i = 0; i < 20; ++i) {
-        EXPECT_EQ(tap(d, Button::R2, t), i == 0 ? Outcome::Wrong : Outcome::NotQuiet);
+        EXPECT_EQ(tap(d, Button::Back, t), i == 0 ? Outcome::Wrong : Outcome::NotQuiet);
         t += 300;
     }
     EXPECT_FALSE(d.coolingDown());

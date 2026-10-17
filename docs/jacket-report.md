@@ -1,6 +1,6 @@
 Jacket model: 1000 one-hour rides per model, seed 0xc0ffee
 
-| Jacket model | Stock: activities opened /h | Stock: recordings started /h | Stock: GPS on | Budget patch: GPS on | Budget + hold-to-start: recordings /h | Budget + hold-to-start: GPS on | RideLock: false unlocks |
+| Jacket model | Stock: activities opened /h | Stock: recordings started /h | Stock: GPS on | Budget patch: GPS on | Budget + hold-to-start: recordings /h | Budget + hold-to-start: GPS on | ButtonLock: false unlocks |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Random taps (1 per 6 s, any button) | 4.8 | 0.96 | 72 % | 72 % | 0.00 | 14 % | 0 in 1000 h |
 | One-sided rubbing (1 per 4 s) | 1.4 | 0.49 | 48 % | 48 % | 0.49 | 44 % | 0 in 1000 h |
@@ -13,7 +13,7 @@ False unlocks in 1000 hours, per lock variant (ablation):
 
 | Lock variant | Random taps (1 per 6 s, any button) | One-sided rubbing (1 per 4 s) | Road bumps (bursts of 2-6 taps) | Squeezes (2-4 buttons at once) | Pinned button + random taps | Chaos (taps/holds/chords, 1 per 1.5 s) |
 |---|---:|---:|---:|---:|---:|---:|
-| RideLock default (L1 R1 R2 L2 L1 R1) | 0 | 0 | 0 | 0 | 0 | 0 |
+| ButtonLock default (L1 R1 R2 L2 L1 R1) | 0 | 0 | 0 | 0 | 0 | 0 |
 |   without the cool-down | 1 | 0 | 1 | 0 | 0 | 2 |
 |   without the quiet rule | 0 | 0 | 0 | 0 | 0 | 0 |
 |   without the chord rule | 0 | 0 | 0 | 0 | 0 | 0 |

@@ -12,7 +12,7 @@
 
 #include <cstdint>
 
-#include "RideLock/UnlockDetector.hpp"
+#include "ButtonLock/UnlockDetector.hpp"
 
 namespace TestSupport
 {
@@ -20,29 +20,29 @@ namespace TestSupport
 inline constexpr uint32_t kKernelClickMaxMs = 500;
 
 /// The decisive outcome of a group of events: the last one that was not None.
-inline RideLock::Outcome merge(RideLock::Outcome acc, RideLock::Outcome next)
+inline ButtonLock::Outcome merge(ButtonLock::Outcome acc, ButtonLock::Outcome next)
 {
-    return next == RideLock::Outcome::None ? acc : next;
+    return next == ButtonLock::Outcome::None ? acc : next;
 }
 
-inline RideLock::Outcome down(RideLock::UnlockDetector& d, RideLock::Button b, uint32_t t)
+inline ButtonLock::Outcome down(ButtonLock::UnlockDetector& d, ButtonLock::Button b, uint32_t t)
 {
-    return d.onInput(b, RideLock::Input::Press, t);
+    return d.onInput(b, ButtonLock::Input::Press, t);
 }
 
-inline RideLock::Outcome up(RideLock::UnlockDetector& d, RideLock::Button b, uint32_t t, uint32_t heldMs)
+inline ButtonLock::Outcome up(ButtonLock::UnlockDetector& d, ButtonLock::Button b, uint32_t t, uint32_t heldMs)
 {
-    RideLock::Outcome o = RideLock::Outcome::None;
+    ButtonLock::Outcome o = ButtonLock::Outcome::None;
     if (heldMs < kKernelClickMaxMs) {
-        o = merge(o, d.onInput(b, RideLock::Input::Click, t));
+        o = merge(o, d.onInput(b, ButtonLock::Input::Click, t));
     }
-    return merge(o, d.onInput(b, RideLock::Input::Release, t));
+    return merge(o, d.onInput(b, ButtonLock::Input::Release, t));
 }
 
 /// One press of @p heldMs starting at @p t, kernel event order.
-inline RideLock::Outcome tap(RideLock::UnlockDetector& d, RideLock::Button b, uint32_t t, uint32_t heldMs = 120)
+inline ButtonLock::Outcome tap(ButtonLock::UnlockDetector& d, ButtonLock::Button b, uint32_t t, uint32_t heldMs = 120)
 {
-    RideLock::Outcome o = down(d, b, t);
+    ButtonLock::Outcome o = down(d, b, t);
     return merge(o, up(d, b, t + heldMs, heldMs));
 }
 

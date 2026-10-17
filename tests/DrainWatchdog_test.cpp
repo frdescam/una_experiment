@@ -3,9 +3,9 @@
 #include <cmath>
 #include <limits>
 
-#include "RideLock/DrainWatchdog.hpp"
+#include "ButtonLock/DrainWatchdog.hpp"
 
-using namespace RideLock;
+using namespace ButtonLock;
 
 namespace
 {

@@ -15,7 +15,7 @@ try it on a watch.
   turns the GPS on, and the stock apps never give up waiting on their START screen.
   **R1 R1 R1 R1** starts a recording. The firmware owns the buttons on the watch
   face, so no app can stop those presses there.
-- **Fix 1: [RideLock](apps/RideLock)**, a lock-screen app.
+- **Fix 1: [ButtonLock](apps/ButtonLock)**, a lock-screen app.
   - While locked it is in front of everything, so the presses go to it.
   - It unlocks only for **L1 R1 R2 L2 L1 R1**, with the next button lit on
     screen, plus rules a sleeve can't satisfy.
@@ -33,12 +33,12 @@ try it on a watch.
   - Nothing has run on a real watch yet; [§8](docs/STUDY.md#8-what-is-not-known-yet-needs-the-real-watch)
     lists what that must confirm.
 
-![RideLock](docs/images/ridelock-screens.png)
+![ButtonLock](docs/images/buttonlock-screens.png)
 
 ## Try it
 
 Prebuilt `.uapp` files are in [`dist/`](dist), with checksums. To install,
-copy `RideLock_0.1.0.uapp` into a new `Apps/RideLock/` folder over USB and
+copy `ButtonLock_0.2.0.uapp` into a new `Apps/ButtonLock/` folder over USB and
 power-cycle the watch. Details, calibration and how to revert:
 [`docs/STUDY.md` §7](docs/STUDY.md#7-trying-it-on-a-watch).
 
@@ -47,7 +47,7 @@ power-cycle the watch. Details, calibration and how to revert:
 ```bash
 tools/bootstrap.sh        # UNA SDK @ b5749dc4, Arm GNU Toolchain 13.3.rel1, Python deps -> .deps/
 source tools/env.sh
-tools/build.sh            # dist/RideLock_0.1.0.uapp
+tools/build.sh            # dist/ButtonLock_0.2.0.uapp
 tools/build.sh --activity # + patched Run, Bike, Hike
 tools/test.sh             # host unit tests + jacket model (needs a C++17 compiler, CMake)
 tools/test.sh --sim       # + PC simulator scripts and service harness (needs SDL2 dev, Ninja)
@@ -59,7 +59,7 @@ tools/test.sh --sim       # + PC simulator scripts and service harness (needs SD
 |---|---|
 | `docs/STUDY.md` | The study |
 | `docs/jacket-report.md` | Full jacket-model results, including the ablation |
-| `apps/RideLock/` | The lock-screen app (service + LVGL GUI + PC simulator) |
+| `apps/ButtonLock/` | The lock-screen app (service + LVGL GUI + PC simulator) |
 | `patches/` | The Run/Bike/Hike patch, its generator script and a draft upstream PR |
 | `tests/` | Host unit tests and the jacket model |
 | `tools/` | Bootstrap, build and test scripts |
@@ -68,7 +68,7 @@ tools/test.sh --sim       # + PC simulator scripts and service harness (needs SD
 ## Licences
 
 - This repository's code: MIT, like the UNA SDK it builds on.
-- The fonts in `apps/RideLock/Software/Apps/LVGL-GUI/assets/fonts` are Poppins
+- The fonts in `apps/ButtonLock/Software/Apps/LVGL-GUI/assets/fonts` are Poppins
   (SIL OFL 1.1), copied from the SDK.
 - The patch modifies UNA's MIT-licensed example apps.
 - "UNA" is a trademark of UNA Watch Ltd. This is an independent experiment.

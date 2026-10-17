@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "values": {
+    "unlockSequence": "UP SELECT BACK DOWN UP SELECT",
+    "relockMinutes": 2,
+    "lockAtBoot": true,
+    "notificationsWhileLocked": true,
+    "drainAlertMilliamps": 8,
+    "drainWindowMinutes": 10,
+    "showCurrent": true
+  }
+}

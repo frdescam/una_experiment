@@ -7,9 +7,9 @@ watch.** Check them against `SHA256SUMS`.
 
 | File | What |
 |---|---|
-| `RideLock_0.1.0.uapp` | The lock-screen app (Utility, autostarts) |
-| `Running_1.5.0-ridelock.uapp` | Stock Run + `patches/activity-apps.patch` |
-| `Cycling_1.5.0-ridelock.uapp` | Stock Bike + the patch |
-| `Hiking_1.5.0-ridelock.uapp` | Stock Hike + the patch |
+| `ButtonLock_0.2.0.uapp` | The lock-screen app (Utility, autostarts) |
+| `Running_1.5.0-holdstart.uapp` | Stock Run + `patches/activity-apps.patch` |
+| `Cycling_1.5.0-holdstart.uapp` | Stock Bike + the patch |
+| `Hiking_1.5.0-holdstart.uapp` | Stock Hike + the patch |
 
 Installing them, and putting the stock apps back: [`docs/STUDY.md`](../docs/STUDY.md) §7.

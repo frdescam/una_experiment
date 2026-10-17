@@ -1,0 +1,79 @@
+{
+  "manifest_version": 1,
+  "type": [
+    "utility"
+  ],
+  "name": "ButtonLock",
+  "icon": "Resources/icon_60x60.png",
+  "binary": "ButtonLock_0.2.0.uapp",
+  "appVersion": "0.2.0",
+  "minKernelVersion": "1.4.0",
+  "requiredHardware": [],
+  "id": "5CBC53B94083EF7D",
+  "description": "Locks the buttons so a sleeve, cuff or glove cannot start an activity: they do nothing until you press the lit ones in turn. Relocks itself, and warns if something drains the battery behind it.",
+  "configFile": "app_config.json",
+  "configFields": [
+    {
+      "id": "unlockSequence",
+      "type": "string",
+      "label": "Unlock sequence",
+      "description": "Buttons to press in turn, e.g. UP SELECT BACK DOWN. Use both sides, never the same button twice in a row. Longer is safer.",
+      "default": "UP SELECT BACK DOWN UP SELECT",
+      "minLength": 5,
+      "maxLength": 64,
+      "pattern": "[A-Za-z12 ,-]+",
+      "validationMessage": "2 to 8 of UP, DOWN, SELECT, BACK, separated by spaces."
+    },
+    {
+      "id": "relockMinutes",
+      "type": "int",
+      "label": "Relock after",
+      "description": "Put the lock back up this long after unlocking. 0 keeps it off until you open ButtonLock again.",
+      "default": 2,
+      "min": 0,
+      "max": 120,
+      "unit": "min"
+    },
+    {
+      "id": "lockAtBoot",
+      "type": "bool",
+      "label": "Lock at start-up",
+      "description": "Show the lock as soon as the watch starts, so a reboot or a power-on inside a sleeve comes up locked.",
+      "default": true
+    },
+    {
+      "id": "notificationsWhileLocked",
+      "type": "bool",
+      "label": "Notifications while locked",
+      "description": "Let phone notifications appear over the lock screen.",
+      "default": true
+    },
+    {
+      "id": "drainAlertMilliamps",
+      "type": "int",
+      "label": "Drain alert above",
+      "description": "Vibrate if the battery current stays above this while locked, which means something (a GPS activity) is running behind the lock. 0 turns the alert off.",
+      "default": 8,
+      "min": 0,
+      "max": 200,
+      "unit": "mA"
+    },
+    {
+      "id": "drainWindowMinutes",
+      "type": "int",
+      "label": "Drain alert after",
+      "description": "How long the current must stay high before the alert.",
+      "default": 10,
+      "min": 2,
+      "max": 60,
+      "unit": "min"
+    },
+    {
+      "id": "showCurrent",
+      "type": "bool",
+      "label": "Show battery current",
+      "description": "Show the measured battery current on the lock screen (an experiment aid).",
+      "default": true
+    }
+  ]
+}

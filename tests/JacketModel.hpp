@@ -5,7 +5,7 @@
  * Generates hours of accidental button activity under several hostile models,
  * turns it into the kernel's event stream, and replays it against
  *
- *   - RideLock's UnlockDetector, delivered one code per 10 Hz frame through a
+ *   - ButtonLock's UnlockDetector, delivered one code per 10 Hz frame through a
  *     16-entry queue that drops the oldest, exactly as SDK::GuiCommandProcessor
  *     and SDK::LVGL::Port do, to count false unlocks; and
  *   - a model of the stock watch's menus and activity app, to count how often
@@ -30,13 +30,13 @@
 #include <random>
 #include <vector>
 
-#include "RideLock/UnlockDetector.hpp"
+#include "ButtonLock/UnlockDetector.hpp"
 
 namespace Jacket
 {
 
-using RideLock::Button;
-using RideLock::Input;
+using ButtonLock::Button;
+using ButtonLock::Input;
 
 inline constexpr uint32_t kFrameMs        = 100;   // SDK::GUI::Config::kFrameRate = 10
 inline constexpr size_t   kKeyQueue       = 16;    // GuiCommandProcessor::mButtonCodes
@@ -116,8 +116,8 @@ inline std::vector<Press> generate(Model model, Rng& rng, uint32_t durationMs)
 
         case Model::OneSide: {
             const bool right = rng.chance(0.5);
-            const Button a = right ? Button::R1 : Button::L1;
-            const Button b = right ? Button::R2 : Button::L2;
+            const Button a = right ? Button::Select : Button::Up;
+            const Button b = right ? Button::Back : Button::Down;
             while ((t += rng.expMs(4000)) < durationMs) {
                 const uint32_t held = rng.chance(0.2) ? rng.uniformInt(500, 3000) : rng.uniformInt(40, 450);
                 addTap(out, rng.chance(0.5) ? a : b, t, held);
@@ -143,7 +143,7 @@ inline std::vector<Press> generate(Model model, Rng& rng, uint32_t durationMs)
 
         case Model::Squeeze:
             while ((t += rng.expMs(12000)) < durationMs) {
-                std::array<Button, 4> all = { Button::L1, Button::L2, Button::R1, Button::R2 };
+                std::array<Button, 4> all = { Button::Up, Button::Down, Button::Select, Button::Back };
                 for (size_t i = 3; i > 0; --i) {
                     std::swap(all[i], all[rng.uniformInt(0, static_cast<uint32_t>(i))]);
                 }
@@ -257,7 +257,7 @@ inline std::vector<Event> paceToFrames(const std::vector<Event>& ev, uint32_t du
 
 /// False unlocks of a detector fed @p delivered (already frame-paced). After
 /// each one the detector is reset, as if the lock went straight back up.
-inline uint32_t countFalseUnlocks(RideLock::UnlockDetector& d, const std::vector<Event>& delivered,
+inline uint32_t countFalseUnlocks(ButtonLock::UnlockDetector& d, const std::vector<Event>& delivered,
                                   uint32_t durationMs)
 {
     d.reset(0);
@@ -266,7 +266,7 @@ inline uint32_t countFalseUnlocks(RideLock::UnlockDetector& d, const std::vector
     for (uint32_t frame = kFrameMs; frame <= durationMs + 10 * kFrameMs; frame += kFrameMs) {
         while (next < delivered.size() && delivered[next].t <= frame) {
             const Event& e = delivered[next++];
-            if (d.onInput(e.b, e.in, e.t) == RideLock::Outcome::Unlocked) {
+            if (d.onInput(e.b, e.in, e.t) == ButtonLock::Outcome::Unlocked) {
                 ++unlocks;
                 d.reset(e.t);
             }
@@ -371,15 +371,15 @@ inline StockResult runStock(const std::vector<Event>& ev, uint32_t durationMs, c
         }
         settle(e.t);
         if (e.in == Input::Press) {
-            othersDown[static_cast<size_t>(e.b)] = (e.b != Button::R1);
+            othersDown[static_cast<size_t>(e.b)] = (e.b != Button::Select);
         } else if (e.in == Input::Release) {
             othersDown[static_cast<size_t>(e.b)] = false;
         }
         const bool anotherDown = othersDown[0] || othersDown[1] || othersDown[3];
-        if (e.b == Button::R1 && e.in == Input::Press) {
+        if (e.b == Button::Select && e.in == Input::Press) {
             r1Down   = isStartScreen() && !(o.holdAlone && anotherDown);
             r1DownAt = e.t;
-        } else if (e.b == Button::R1 && e.in == Input::Release) {
+        } else if (e.b == Button::Select && e.in == Input::Release) {
             holdFires(e.t);
             r1Down = false;
         } else if (o.holdAlone && r1Down && e.in == Input::Press) {
@@ -392,35 +392,35 @@ inline StockResult runStock(const std::vector<Event>& ev, uint32_t durationMs, c
         lastIn = t;
         switch (s) {
             case S::Home:
-                if (e.b == Button::R1) { enter(S::ActivityMenu, t); }
-                else if (e.b == Button::L1) { enter(S::UtilityMenu, t); }
-                else if (e.b == Button::L2) { enter(S::Glances, t); }
+                if (e.b == Button::Select) { enter(S::ActivityMenu, t); }
+                else if (e.b == Button::Up) { enter(S::UtilityMenu, t); }
+                else if (e.b == Button::Down) { enter(S::Glances, t); }
                 break;
             case S::ActivityMenu:
-                if (e.b == Button::R1) {
+                if (e.b == Button::Select) {
                     sel      = 0;
                     openedAt = t;
                     ++r.activityOpens;
                     enter(S::ActPre, t);
-                } else if (e.b == Button::R2) {
+                } else if (e.b == Button::Back) {
                     enter(S::Home, t);
                 }
                 break;
             case S::UtilityMenu:
-                if (e.b == Button::R1) { enter(S::UtilityApp, t); }
-                else if (e.b == Button::R2) { enter(S::Home, t); }
+                if (e.b == Button::Select) { enter(S::UtilityApp, t); }
+                else if (e.b == Button::Back) { enter(S::Home, t); }
                 break;
             case S::UtilityApp:
-                if (e.b == Button::R2) { enter(S::UtilityMenu, t); }
+                if (e.b == Button::Back) { enter(S::UtilityMenu, t); }
                 break;
             case S::Glances:
-                if (e.b == Button::R2) { enter(S::Home, t); }
+                if (e.b == Button::Back) { enter(S::Home, t); }
                 break;
             case S::ActPre:
-                if (e.b == Button::L1) { sel = (sel + 2) % 3; }
-                else if (e.b == Button::L2) { sel = (sel + 1) % 3; }
-                else if (e.b == Button::R2) { enter(S::Home, t); }
-                else if (e.b == Button::R1) {
+                if (e.b == Button::Up) { sel = (sel + 2) % 3; }
+                else if (e.b == Button::Down) { sel = (sel + 1) % 3; }
+                else if (e.b == Button::Back) { enter(S::Home, t); }
+                else if (e.b == Button::Select) {
                     if (sel != 0) { enter(S::ActSub, t); }
                     else if (o.holdToStartMs > 0) { /* a click is not enough */ }
                     else if (hasFix(t)) { ++r.recordingsStarted; enter(S::Recording, t); }
@@ -428,11 +428,11 @@ inline StockResult runStock(const std::vector<Event>& ev, uint32_t durationMs, c
                 }
                 break;
             case S::ActConfirm:
-                if (e.b == Button::R1 && o.holdToStartMs == 0) { ++r.recordingsStarted; enter(S::Recording, t); }
-                else if (e.b == Button::R2) { enter(S::ActPre, t); }
+                if (e.b == Button::Select && o.holdToStartMs == 0) { ++r.recordingsStarted; enter(S::Recording, t); }
+                else if (e.b == Button::Back) { enter(S::ActPre, t); }
                 break;
             case S::ActSub:
-                if (e.b == Button::R2) { enter(S::ActPre, t); }
+                if (e.b == Button::Back) { enter(S::ActPre, t); }
                 break;
             case S::Recording:
                 // Ending a recording needs R1 held for the hold-to-confirm

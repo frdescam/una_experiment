@@ -3,9 +3,9 @@
 
 # Build trees
 build-tests/
-apps/RideLock/Software/Apps/RideLock-CMake/build/
-apps/RideLock/Software/Apps/LVGL-GUI/simulator/build/
-apps/RideLock/Software/Apps/LVGL-GUI/simulator/build-*/
+apps/ButtonLock/Software/Apps/ButtonLock-CMake/build/
+apps/ButtonLock/Software/Apps/LVGL-GUI/simulator/build/
+apps/ButtonLock/Software/Apps/LVGL-GUI/simulator/build-*/
 
 # The PC simulator's mock file system
-apps/RideLock/Software/Output/
+apps/ButtonLock/Software/Output/

@@ -50,7 +50,7 @@ single click, or two without a fix. Now:
 ## Verified
 
 - Builds for the watch with Arm GNU Toolchain 13.3.rel1: `Running`, `Cycling` and
-  `Hiking` `_1.5.0-ridelock.uapp`. No new warnings in the touched files.
+  `Hiking` `_1.5.0-holdstart.uapp`. No new warnings in the touched files.
 - Run's TouchGFX PC simulator, driven with real key events under Xvfb:
 
   | Input on START (GPS fixed) | Stock | Patched |
@@ -67,7 +67,7 @@ single click, or two without a fix. Now:
   taps, bumps, squeezes and pinned buttons go to zero, and GPS-on time drops from
   72–93 % to 4–21 % of a ride. A single-button *hold* still starts an activity
   (one-sided rubbing: 0.49/h). That is why the patch is a second layer behind
-  RideLock, not a replacement for it.
+  ButtonLock, not a replacement for it.
 
 Not verified on a real watch.
 

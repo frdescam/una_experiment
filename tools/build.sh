@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build the watch apps. Run tools/bootstrap.sh and `source tools/env.sh` first.
 #
-#   tools/build.sh                RideLock only
+#   tools/build.sh                ButtonLock only
 #   tools/build.sh --activity     also Run, Bike and Hike with patches/ applied
 #
 # Results are copied to dist/.
@@ -13,11 +13,11 @@ command -v arm-none-eabi-gcc >/dev/null || { echo "arm-none-eabi-gcc not on PATH
 
 mkdir -p "$ROOT/dist"
 
-echo "==> RideLock"
-APP="$ROOT/apps/RideLock/Software/Apps/RideLock-CMake"
+echo "==> ButtonLock"
+APP="$ROOT/apps/ButtonLock/Software/Apps/ButtonLock-CMake"
 cmake -G "Unix Makefiles" -S "$APP" -B "$APP/build" >/dev/null
 cmake --build "$APP/build" -j"$(nproc 2>/dev/null || echo 4)" 2>&1 | grep -E "Image  |error:" || true
-cp "$APP"/build/RideLock_*.uapp "$ROOT/dist/"
+cp "$APP"/build/ButtonLock_*.uapp "$ROOT/dist/"
 
 if [ "${1:-}" = "--activity" ]; then
     # A separate worktree of the SDK, so the patch never touches $UNA_SDK.
@@ -32,9 +32,9 @@ if [ "${1:-}" = "--activity" ]; then
     for app in Running Cycling Hiking; do
         echo "==> $app (patched)"
         DIR="$PATCHED/Examples/Apps/$app/Software/Apps/$app-CMake"
-        UNA_SDK="$PATCHED" cmake -G "Unix Makefiles" -S "$DIR" -B "$DIR/build" -DBUILD_VERSION=1.5.0-ridelock >/dev/null
+        UNA_SDK="$PATCHED" cmake -G "Unix Makefiles" -S "$DIR" -B "$DIR/build" -DBUILD_VERSION=1.5.0-holdstart >/dev/null
         UNA_SDK="$PATCHED" cmake --build "$DIR/build" -j"$(nproc 2>/dev/null || echo 4)" 2>&1 | grep -E "Image  |error:" || true
-        cp "$DIR"/build/*_1.5.0-ridelock.uapp "$ROOT/dist/"
+        cp "$DIR"/build/*_1.5.0-holdstart.uapp "$ROOT/dist/"
     done
 fi
 

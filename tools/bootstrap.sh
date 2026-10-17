@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fetch everything needed to build RideLock (and the patched activity apps)
+# Fetch everything needed to build ButtonLock (and the patched activity apps)
 # into .deps/, without touching the rest of the system:
 #
 #   .deps/una-sdk     UNAWatch/una-sdk at the commit this repo was built

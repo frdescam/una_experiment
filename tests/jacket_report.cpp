@@ -9,7 +9,7 @@
  *     share of the ride with the GPS on;
  *   - with the activity-app patch (5 min pre-activity budget, and optionally
  *     a 1.5 s hold to start): recordings started and GPS-on share;
- *   - with RideLock: false unlocks, for the default lock and for variants
+ *   - with ButtonLock: false unlocks, for the default lock and for variants
  *     with one of its rules switched off (the ablation).
  */
 
@@ -19,7 +19,7 @@
 #include <vector>
 
 #include "JacketModel.hpp"
-#include "RideLock/UnlockDetector.hpp"
+#include "ButtonLock/UnlockDetector.hpp"
 
 using namespace Jacket;
 
@@ -30,14 +30,14 @@ constexpr uint32_t kHour = 3600u * 1000u;
 
 struct Variant {
     const char*            name;
-    RideLock::Sequence     seq;
-    RideLock::UnlockTiming timing;
+    ButtonLock::Sequence     seq;
+    ButtonLock::UnlockTiming timing;
 };
 
-RideLock::Sequence seq(const char* text)
+ButtonLock::Sequence seq(const char* text)
 {
-    RideLock::Sequence s;
-    if (!RideLock::parseSequence(text, s)) {
+    ButtonLock::Sequence s;
+    if (!ButtonLock::parseSequence(text, s)) {
         std::fprintf(stderr, "bad sequence %s\n", text);
         std::exit(2);
     }
@@ -46,37 +46,37 @@ RideLock::Sequence seq(const char* text)
 
 std::vector<Variant> variants()
 {
-    const RideLock::UnlockTiming def;
+    const ButtonLock::UnlockTiming def;
 
-    RideLock::UnlockTiming noQuiet = def;
+    ButtonLock::UnlockTiming noQuiet = def;
     noQuiet.quietMs = 0;
 
-    RideLock::UnlockTiming noChord = def;
+    ButtonLock::UnlockTiming noChord = def;
     noChord.stuckMs = 0;          // every other button counts as pinned: chords pass
 
-    RideLock::UnlockTiming noCooldown = def;
+    ButtonLock::UnlockTiming noCooldown = def;
     noCooldown.rejectLimit = 0;
 
-    RideLock::UnlockTiming naive;  // any order-correct clicks, any timing
+    ButtonLock::UnlockTiming naive;  // any order-correct clicks, any timing
     naive.quietMs    = 0;
     naive.stuckMs    = 0;
     naive.maxGapMs   = 0xFFFFFFFFu;
     naive.maxPressMs = 0xFFFFFFFFu;
     naive.rejectLimit = 0;
 
-    const RideLock::Sequence four = seq("L1 R1 R2 L2");
+    const ButtonLock::Sequence four = seq("L1 R1 R2 L2");
     return {
-        { "RideLock default (L1 R1 R2 L2 L1 R1)", RideLock::defaultSequence(), def },
-        { "  without the cool-down",          RideLock::defaultSequence(), noCooldown },
-        { "  without the quiet rule",         RideLock::defaultSequence(), noQuiet },
-        { "  without the chord rule",         RideLock::defaultSequence(), noChord },
+        { "ButtonLock default (L1 R1 R2 L2 L1 R1)", ButtonLock::defaultSequence(), def },
+        { "  without the cool-down",          ButtonLock::defaultSequence(), noCooldown },
+        { "  without the quiet rule",         ButtonLock::defaultSequence(), noQuiet },
+        { "  without the chord rule",         ButtonLock::defaultSequence(), noChord },
         { "  5 steps (L1 R1 R2 L2 L1)",       seq("L1 R1 R2 L2 L1"),       def     },
         { "  4 steps (L1 R1 R2 L2)",          four,                        def     },
         { "    4 steps without the cool-down", four,                       noCooldown },
         { "    4 steps without the quiet rule", four,                      noQuiet },
         { "    4 steps without the chord rule", four,                      noChord },
         { "  2 steps (L1 R1)",                seq("L1 R1"),                def     },
-        { "Naive 6-click lock (no rules)",    RideLock::defaultSequence(), naive   },
+        { "Naive 6-click lock (no rules)",    ButtonLock::defaultSequence(), naive   },
         { "Naive 4-click lock (no rules)",    four,                        naive   },
         { "Naive 2-click lock (no rules)",    seq("L1 R1"),                naive   },
     };
@@ -103,7 +103,7 @@ int main(int argc, char** argv)
 
     std::printf("| Jacket model | Stock: activities opened /h | Stock: recordings started /h "
                 "| Stock: GPS on | Budget patch: GPS on | Budget + hold-to-start: recordings /h "
-                "| Budget + hold-to-start: GPS on | RideLock: false unlocks |\n");
+                "| Budget + hold-to-start: GPS on | ButtonLock: false unlocks |\n");
     std::printf("|---|---:|---:|---:|---:|---:|---:|---:|\n");
 
     std::vector<std::vector<uint32_t>> ablation(vars.size(), std::vector<uint32_t>(kAllModels.size(), 0));
@@ -127,7 +127,7 @@ int main(int argc, char** argv)
             gpsHold  += h.gpsOnMs;
 
             for (size_t v = 0; v < vars.size(); ++v) {
-                RideLock::UnlockDetector d(vars[v].seq, vars[v].timing);
+                ButtonLock::UnlockDetector d(vars[v].seq, vars[v].timing);
                 ablation[v][m] += countFalseUnlocks(d, delivered, kHour);
             }
         }
