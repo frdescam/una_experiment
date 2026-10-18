@@ -1,37 +1,51 @@
 /**
  * @file    seq_study.cpp
- * @brief   How short can the unlock sequence be? Monte Carlo study.
+ * @brief   How short can the unlock sequence be? Monte Carlo study
+ *          (results in docs/sequence-study.md).
  *
  *   seq_study [hostile-hours] [calibrated-hours] [threads] [seed]
  *
- * For each lock variant (6, 5, 4 steps; every valid 3-step sequence; 2 and 3
- * steps finished by a hold; a naive 3-click lock) and each jacket model it
- * replays one-hour rides at two noise levels:
+ * Defaults: 10000 h per model at each level, every core, seed 0x5e9. Build it
+ * with -DCMAKE_BUILD_TYPE=Release: about 2 min on 4 cores (a Debug build is
+ * some ten times slower).
  *
- *   hostile     the models as written (an hour of sustained noise);
+ * For each lock variant (6, 5 and 4 steps, other 4-step shapes, every 3-step
+ * code, 2 steps, 1 tap + hold, 2 taps + hold, naive locks) and each jacket
+ * model it replays one-hour rides at two noise levels:
+ *
+ *   harsh       the models as written (hostile-hours per model);
  *   calibrated  each model's event rate scaled down until the stock watch
- *               opens about one activity per hour.
+ *               opens about one activity per hour (calibrated-hours per model);
  *
- * and counts, per 1000 h: false unlocks (all rules on), and what the noise
- * then does on the watch face while the lock is down (2 min until relock):
- * activities opened (GPS on) and recordings started, on the stock apps and on
- * the patched apps (5 min budget, 1.5 s hold of R1 alone to start).
- * It also simulates a person unlocking (bare hands and gloves) through the
- * same detector, and the share of time the cool-down makes the lock deaf.
+ * and, for the candidate locks only, at 2x and 4x the calibrated rate (the
+ * calibration band), plus a rate sweep of the random-taps model. It counts, per
+ * 1000 h: false unlocks (all rules on), and what the noise then does on the
+ * watch face while the lock is down (2 min until relock): activities opened
+ * (GPS on) and recordings started, on the stock apps and on the patched apps
+ * (5 min budget, 1.5 s hold of SELECT alone to start). It also simulates a
+ * person unlocking (bare hands and gloves) through the same detector, and the
+ * share of time the cool-down makes the lock deaf.
+ *
+ * Every Sequence is built directly, not through parseSequence(), so codes the
+ * settings refuse (2 steps, codes on two buttons) are measured too; the output
+ * says which ones the settings accept.
  */
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <initializer_list>
 #include <map>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "JacketModel.hpp"
+#include "ButtonLock/Sequence.hpp"
 #include "ButtonLock/UnlockDetector.hpp"
 
 using namespace Jacket;
@@ -55,41 +69,28 @@ uint64_t mix(uint64_t x)
     return x ^ (x >> 31);
 }
 
+/// Streams: 1-4 the four noise levels, 7 the calibration, 16 and up the rate sweep.
 uint64_t rideSeed(uint64_t seed, unsigned stream, Model m, uint64_t ride)
 {
     return mix(seed ^ mix((static_cast<uint64_t>(stream) << 40) ^ (static_cast<uint64_t>(m) << 32) ^ ride));
 }
 
+/// One person's attempt. The variant and the hand profile sit in the high
+/// bits (with a tag no ride stream uses), the trial in the low 32, so no two
+/// (variant, profile, trial) share a random stream.
+uint64_t humanSeed(uint64_t seed, size_t variant, size_t profile, uint32_t trial)
+{
+    return mix(seed ^ mix((0xA5ull << 56) ^ (static_cast<uint64_t>(variant) << 40) ^
+                          (static_cast<uint64_t>(profile) << 32) ^ trial));
+}
+
 // --- names -----------------------------------------------------------------------
 
-const char* sdkName(Button b)
+std::string codeText(const Sequence& s)
 {
-    switch (b) {
-        case Button::Up: return "UP";
-        case Button::Select: return "SELECT";
-        case Button::Down: return "DOWN";
-        case Button::Back: return "BACK";
-    }
-    return "?";
-}
-
-std::string seqText(const Sequence& s)
-{
-    char buf[40];
+    char buf[80];
     ButtonLock::formatSequence(s, buf, sizeof(buf));
     return buf;
-}
-
-std::string seqSdk(const Sequence& s)
-{
-    std::string out;
-    for (size_t i = 0; i < s.length; ++i) {
-        if (i > 0) {
-            out += ' ';
-        }
-        out += sdkName(s[i]);
-    }
-    return out;
 }
 
 const char* shortModel(Model m)
@@ -107,7 +108,9 @@ const char* shortModel(Model m)
     return "?";
 }
 
-/// ABA with A/B in the same row, ABA on a diagonal, or three different buttons.
+/// For a 3-step code: ABA row (A and B on the same row), ABA diagonal, ABA
+/// side (both on one side), or ABC with each move marked - (across a row),
+/// x (diagonal), | (along a side).
 std::string shapeOf(const Sequence& s)
 {
     auto row  = [](Button b) { return (b == Button::Up || b == Button::Select) ? 0 : 1; };
@@ -115,21 +118,31 @@ std::string shapeOf(const Sequence& s)
     std::string out;
     for (size_t i = 1; i < s.length; ++i) {
         const Button a = s[i - 1], b = s[i];
-        const char c = (side(a) == side(b)) ? '|' : (row(a) == row(b) ? '-' : 'x');
-        out += c;
+        out += (side(a) == side(b)) ? '|' : (row(a) == row(b) ? '-' : 'x');
     }
-    if (s.length == 3) {
-        if (s[0] == s[2]) {
-            return out[0] == '-' ? "ABA row" : "ABA diagonal";
+    if (s.length == 3 && s[0] == s[2]) {
+        return out[0] == '-' ? "ABA row" : (out[0] == 'x' ? "ABA diagonal" : "ABA side");
+    }
+    return s.length == 3 ? "ABC " + out : out;
+}
+
+size_t distinctButtons(const Sequence& s)
+{
+    bool seen[ButtonLock::kButtonCount] = {};
+    size_t n = 0;
+    for (size_t i = 0; i < s.length; ++i) {
+        bool& b = seen[static_cast<size_t>(s[i])];
+        if (!b) {
+            b = true;
+            ++n;
         }
-        return "ABC " + out;
     }
-    return out;
+    return n;
 }
 
 // --- variants --------------------------------------------------------------------
 
-enum class Family : uint8_t { Six, Five, Four, Three, Two, TwoHold, ThreeHold, Naive };
+enum class Family : uint8_t { Six, Five, Four, Three, Two, TapHold, TwoTapsHold, Naive };
 
 struct Variant {
     std::string  label;
@@ -137,101 +150,173 @@ struct Variant {
     uint32_t     holdMs;
     Sequence     seq;
     UnlockTiming timing;
-    uint32_t     clicks() const { return holdMs > 0 ? seq.length - 1u : seq.length; }
-    std::string  presses() const
+    const char*  settings;   ///< accepted / refused by the settings, not offered (holds), - (naive)
+
+    uint32_t    taps() const { return holdMs > 0 ? seq.length - 1u : seq.length; }
+    std::string presses() const
     {
-        char buf[40];
-        if (holdMs > 0) {
-            std::snprintf(buf, sizeof(buf), "%u (%u tap%s + hold)", seq.length, clicks(), clicks() == 1 ? "" : "s");
-        } else {
-            std::snprintf(buf, sizeof(buf), "%u", seq.length);
+        if (holdMs == 0) {
+            return std::to_string(seq.length);
         }
+        char buf[48];
+        std::snprintf(buf, sizeof(buf), "%u (%u tap%s + hold)", static_cast<unsigned>(seq.length), taps(),
+                      taps() == 1 ? "" : "s");
         return buf;
     }
+    bool threeButtons() const { return family != Family::Naive && distinctButtons(seq) >= 3; }
 };
 
-Sequence parse(const char* text)
+/// A sequence from its steps, as the detector takes it (see jacket_report.cpp).
+Sequence steps(std::initializer_list<Button> list)
 {
     Sequence s;
-    if (!ButtonLock::parseSequence(text, s)) {
-        std::fprintf(stderr, "bad sequence %s\n", text);
-        std::exit(2);
+    for (Button b : list) {
+        s.steps[s.length++] = b;
     }
     return s;
 }
 
-/// Every sequence of @p len steps the app accepts (both sides, no repeats).
-std::vector<Sequence> allSequences(size_t len)
+bool sameCode(const Sequence& a, const Sequence& b)
 {
-    static const char* names[4] = { "L1", "R1", "L2", "R2" };
+    if (a.length != b.length) {
+        return false;
+    }
+    for (size_t i = 0; i < a.length; ++i) {
+        if (a[i] != b[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+Sequence firstDefault()
+{
+    using B = Button;
+    return steps({ B::Up, B::Select, B::Back, B::Down, B::Up, B::Select });
+}
+
+/// What the app's settings say, by asking its parser.
+bool settingsAccept(const Sequence& s)
+{
+    Sequence out;
+    return ButtonLock::parseSequence(codeText(s).c_str(), out);
+}
+
+/// Every code of @p len steps with no button twice in a row (a repeat is what
+/// one bouncing button does; the settings never allowed it).
+std::vector<Sequence> allCodes(size_t len)
+{
+    static constexpr Button kOrder[4] = { Button::Up, Button::Select, Button::Back, Button::Down };
     size_t total = 1;
     for (size_t i = 0; i < len; ++i) {
         total *= 4;
     }
     std::vector<Sequence> out;
     for (size_t code = 0; code < total; ++code) {
-        std::string text;
-        size_t div = total / 4;
-        for (size_t i = 0; i < len; ++i, div /= 4) {
-            text += names[(code / div) % 4];
-            text += ' ';
-        }
         Sequence s;
-        if (ButtonLock::parseSequence(text.c_str(), s)) {
+        size_t div = total / 4;
+        bool ok = true;
+        for (size_t i = 0; i < len; ++i, div /= 4) {
+            const Button b = kOrder[(code / div) % 4];
+            if (s.length > 0 && s[s.length - 1] == b) {
+                ok = false;
+            }
+            s.steps[s.length++] = b;
+        }
+        if (ok) {
             out.push_back(s);
         }
     }
     return out;
 }
 
+UnlockTiming naiveTiming()   // any order-correct clicks, any timing
+{
+    UnlockTiming t;
+    t.quietMs     = 0;
+    t.stuckMs     = 0;
+    t.maxGapMs    = 0xFFFFFFFFu;
+    t.maxPressMs  = 0xFFFFFFFFu;
+    t.rejectLimit = 0;
+    return t;
+}
+
 std::vector<Variant> makeVariants()
 {
+    using B = Button;
     std::vector<Variant> v;
-    const UnlockTiming def;
+    const UnlockTiming rules;   // all of ButtonLock's rules, as shipped
+    const Sequence def = ButtonLock::defaultSequence();
 
     auto add = [&](Family f, const Sequence& s, uint32_t hold, const UnlockTiming& base) {
         UnlockTiming t = base;
         t.finalHoldMs = hold;
-        std::string label = seqText(s);
-        if (hold > 0) {
-            char buf[32];
-            std::snprintf(buf, sizeof(buf), " + hold %.1f s", hold / 1000.0);
-            label += buf;
+        std::string label;
+        const char* settings;
+        if (f == Family::Naive) {
+            label    = "Naive " + std::to_string(s.length) + "-click " + codeText(s) + " (no rules)";
+            settings = "-";
+        } else if (hold > 0) {
+            Sequence prefix = s;
+            --prefix.length;
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), " (%.1f s)", hold / 1000.0);
+            label    = codeText(prefix) + ", then hold " + ButtonLock::buttonName(s[s.length - 1]) + buf;
+            settings = "not offered";
+        } else {
+            label = codeText(s);
+            if (sameCode(s, def)) {
+                label += " [default]";
+            }
+            if (sameCode(s, firstDefault())) {
+                label += " [first default]";
+            }
+            settings = settingsAccept(s) ? "accepted" : "refused";
         }
-        v.push_back(Variant{ label, f, hold, s, t });
+        v.push_back(Variant{ label, f, hold, s, t, settings });
     };
 
-    add(Family::Six, ButtonLock::defaultSequence(), 0, def);
-    add(Family::Five, parse("L1 R1 R2 L2 L1"), 0, def);
-    for (const char* four : { "L1 R1 R2 L2", "L1 R2 L2 R1", "L1 R2 R1 L2", "L1 R1 L2 R2",
-                              "L1 L2 R1 R2", "L1 R1 L1 R1", "L1 R2 L1 R2" }) {
-        add(Family::Four, parse(four), 0, def);
+    add(Family::Six, firstDefault(), 0, rules);
+    add(Family::Five, steps({ B::Up, B::Select, B::Back, B::Down, B::Up }), 0, rules);
+    add(Family::Four, def, 0, rules);
+    for (const Sequence& s : { steps({ B::Up, B::Select, B::Back, B::Down }), steps({ B::Up, B::Back, B::Down, B::Select }),
+                               steps({ B::Up, B::Back, B::Select, B::Down }), steps({ B::Up, B::Select, B::Down, B::Back }),
+                               steps({ B::Up, B::Down, B::Select, B::Back }), steps({ B::Up, B::Select, B::Up, B::Select }),
+                               steps({ B::Up, B::Back, B::Up, B::Back }) }) {
+        if (!sameCode(s, def)) {
+            add(Family::Four, s, 0, rules);
+        }
     }
-    for (const Sequence& s : allSequences(3)) {
-        add(Family::Three, s, 0, def);
+    for (const Sequence& s : allCodes(3)) {
+        add(Family::Three, s, 0, rules);
     }
-    add(Family::Two, parse("L1 R1"), 0, def);
-    add(Family::Two, parse("L1 R2"), 0, def);
+    for (const Sequence& s : { steps({ B::Up, B::Select }), steps({ B::Up, B::Back }), steps({ B::Up, B::Down }) }) {
+        add(Family::Two, s, 0, rules);
+    }
     for (uint32_t hold : { 800u, 1000u }) {
-        for (const Sequence& s : allSequences(2)) {
-            add(Family::TwoHold, s, hold, def);
+        for (const Sequence& s : allCodes(2)) {
+            add(Family::TapHold, s, hold, rules);
         }
     }
     for (uint32_t hold : { 800u, 1000u }) {
-        for (const Sequence& s : allSequences(3)) {
-            add(Family::ThreeHold, s, hold, def);
+        for (const Sequence& s : allCodes(3)) {
+            add(Family::TwoTapsHold, s, hold, rules);
         }
     }
-
-    UnlockTiming naive;   // any three order-correct clicks, any timing
-    naive.quietMs     = 0;
-    naive.stuckMs     = 0;
-    naive.maxGapMs    = 0xFFFFFFFFu;
-    naive.maxPressMs  = 0xFFFFFFFFu;
-    naive.rejectLimit = 0;
-    add(Family::Naive, parse("L1 R1 R2"), 0, naive);
-    v.back().label = "Naive 3-click L1 R1 R2 (no rules)";
+    add(Family::Naive, steps({ B::Up, B::Select, B::Back }), 0, naiveTiming());
+    add(Family::Naive, def, 0, naiveTiming());
     return v;
+}
+
+size_t findVariant(const std::vector<Variant>& v, Family f, const Sequence& s, uint32_t hold)
+{
+    for (size_t i = 0; i < v.size(); ++i) {
+        if (v[i].family == f && v[i].holdMs == hold && sameCode(v[i].seq, s)) {
+            return i;
+        }
+    }
+    std::fprintf(stderr, "no variant %s\n", codeText(s).c_str());
+    std::exit(2);
 }
 
 // --- statistics ------------------------------------------------------------------
@@ -259,42 +344,33 @@ struct Interval {
 };
 
 /// Exact (Garwood) 95% interval for a Poisson count; Wilson-Hilferty above 2000.
+/// A zero count gets the 3/N rule (one-sided 95%).
 Interval poisson95(uint64_t k)
 {
     if (k == 0) {
-        return { 0.0, 3.0 };   // the 3/N rule (one-sided 95%)
+        return { 0.0, 3.0 };
     }
     const double kd = static_cast<double>(k);
     if (k > 2000) {
-        const double z = 1.959964;
+        const double z  = 1.959964;
         const double lo = kd * std::pow(1.0 - 1.0 / (9.0 * kd) - z / (3.0 * std::sqrt(kd)), 3.0);
         const double k1 = kd + 1.0;
         const double hi = k1 * std::pow(1.0 - 1.0 / (9.0 * k1) + z / (3.0 * std::sqrt(k1)), 3.0);
         return { lo, hi };
     }
     const double target = std::log(0.025);
-    // upper: P(X <= k; hi) = 0.025
-    double a = kd, b = kd * 3.0 + 10.0;
+    double a = kd, b = kd * 3.0 + 10.0;   // upper: P(X <= k; hi) = 0.025
     for (int it = 0; it < 80; ++it) {
         const double m = 0.5 * (a + b);
-        if (logPoissonCdf(k, m) > target) {
-            a = m;
-        } else {
-            b = m;
-        }
+        (logPoissonCdf(k, m) > target ? a : b) = m;
     }
     const double hi = 0.5 * (a + b);
-    // lower: P(X >= k; lo) = 0.025, i.e. P(X <= k-1; lo) = 0.975
-    const double target2 = std::log(0.975);
+    const double target2 = std::log(0.975);   // lower: P(X <= k-1; lo) = 0.975
     a = 0.0;
     b = kd;
     for (int it = 0; it < 80; ++it) {
         const double m = 0.5 * (a + b);
-        if (m <= 0.0 || logPoissonCdf(k - 1, m) > target2) {
-            a = m;
-        } else {
-            b = m;
-        }
+        (m <= 0.0 || logPoissonCdf(k - 1, m) > target2 ? a : b) = m;
     }
     return { 0.5 * (a + b), hi };
 }
@@ -319,22 +395,43 @@ std::string num(double x)
     return buf;
 }
 
-/// "r (lo-hi)" per 1000 h, or "0 (<u)" for a zero count.
-std::string rate(uint64_t k, double hours, bool withInterval = true)
+/// A count as a rate per @p per hours of noise: "r", or with @p ci "r (lo-hi)"
+/// (Poisson 95%). A zero is always "0 (<u)": u is the 3/N upper bound.
+std::string rateOf(uint64_t k, double hours, double per, bool ci)
 {
-    const double per = 1000.0 / hours;
-    const Interval ci = poisson95(k);
+    const double   scale = per / hours;
+    const Interval i     = poisson95(k);
     if (k == 0) {
-        return withInterval ? "0 (<" + num(ci.hi * per) + ")" : "0";
+        return "0 (<" + num(i.hi * scale) + ")";
     }
-    const std::string r = num(static_cast<double>(k) * per);
-    return withInterval ? r + " (" + num(ci.lo * per) + "-" + num(ci.hi * per) + ")" : r;
+    const std::string r = num(static_cast<double>(k) * scale);
+    return ci ? r + " (" + num(i.lo * scale) + "-" + num(i.hi * scale) + ")" : r;
 }
 
-/// Upper end of the 95% interval per 1000 h (the 3/N bound for zero).
-double upper(uint64_t k, double hours)
+std::string rate(uint64_t k, double hours, bool ci = false) { return rateOf(k, hours, 1000.0, ci); }
+
+/// Per hour with two decimals (the no-lock baselines); a zero gets its 3/N bound.
+std::string perHour(uint64_t k, double hours)
 {
-    return poisson95(k).hi * 1000.0 / hours;
+    if (k == 0) {
+        return rateOf(0, hours, 1.0, false);
+    }
+    char buf[32];
+    const double r = static_cast<double>(k) / hours;
+    std::snprintf(buf, sizeof(buf), r >= 0.01 ? "%.2f" : "%.4f", r);
+    return buf;
+}
+
+/// A share of @p n trials in percent; a zero gets its 3/N bound.
+std::string percent(uint64_t k, uint64_t n)
+{
+    char buf[48];
+    if (k == 0) {
+        std::snprintf(buf, sizeof(buf), "0 (<%.3g %%)", 300.0 / static_cast<double>(n));
+    } else {
+        std::snprintf(buf, sizeof(buf), "%.2f %%", 100.0 * static_cast<double>(k) / static_cast<double>(n));
+    }
+    return buf;
 }
 
 // --- simulation ------------------------------------------------------------------
@@ -362,6 +459,7 @@ struct Cell {
     }
 };
 
+/// The same noise on a watch with no lock at all.
 struct Baseline {
     uint64_t presses = 0, opens = 0, recs = 0, gpsMs = 0, pRecs = 0, pGpsMs = 0;
     void merge(const Baseline& o)
@@ -428,17 +526,16 @@ double calibrate(Model m, double target, uint32_t hours, uint64_t seed, unsigned
     double lo = std::log(0.002), hi = 0.0;
     for (int it = 0; it < 18; ++it) {
         const double mid = 0.5 * (lo + hi);
-        if (stockOpensPerHour(m, std::exp(mid), hours, seed, threads) < target) {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
+        (stockOpensPerHour(m, std::exp(mid), hours, seed, threads) < target ? lo : hi) = mid;
     }
     return std::exp(0.5 * (lo + hi));
 }
 
-void runModel(unsigned level, Model m, double r, uint32_t hours, uint64_t seed, unsigned threads,
-              const std::vector<Variant>& vars, std::vector<Cell>& out, Baseline& base)
+/// Rides of one model at rate scale @p r, replayed against the variants in
+/// @p active (the others' cells stay empty) and against no lock at all.
+void runModel(unsigned stream, Model m, double r, uint32_t hours, uint64_t seed, unsigned threads,
+              const std::vector<Variant>& vars, const std::vector<size_t>& active, std::vector<Cell>& out,
+              Baseline& base)
 {
     std::vector<std::vector<Cell>> local(threads, std::vector<Cell>(vars.size()));
     std::vector<Baseline> lbase(threads);
@@ -447,7 +544,7 @@ void runModel(unsigned level, Model m, double r, uint32_t hours, uint64_t seed, 
     const LockedRideOptions lo;
 
     parallelFor(hours, threads, [&](uint32_t ride, unsigned th) {
-        Rng rng(rideSeed(seed, level, m, ride));
+        Rng rng(rideSeed(seed, stream, m, ride));
         const auto presses   = generate(m, rng, kHour, r);
         const auto kernel    = toKernelEvents(presses, kHour);
         const auto delivered = paceToFrames(kernel, kHour);
@@ -462,7 +559,7 @@ void runModel(unsigned level, Model m, double r, uint32_t hours, uint64_t seed, 
         b.pRecs  += p.recordingsStarted;
         b.pGpsMs += p.gpsOnMs;
 
-        for (size_t v = 0; v < vars.size(); ++v) {
+        for (size_t v : active) {
             ButtonLock::UnlockDetector d(vars[v].seq, vars[v].timing);
             local[th][v].add(runLockedRide(d, delivered, kernel, kHour, lo, stock, patched));
         }
@@ -471,7 +568,7 @@ void runModel(unsigned level, Model m, double r, uint32_t hours, uint64_t seed, 
     out.assign(vars.size(), Cell{});
     base = Baseline{};
     for (unsigned t = 0; t < threads; ++t) {
-        for (size_t v = 0; v < vars.size(); ++v) {
+        for (size_t v : active) {
             out[v].merge(local[t][v]);
         }
         base.merge(lbase[t]);
@@ -495,6 +592,7 @@ const HumanProfile kHumans[] = {
     { "bare hand", 130, 0.35, 250, 0.45, 0.01, 0.005, 0.01, 300, 0.35, 1500 },
     { "motorcycle gloves", 250, 0.40, 350, 0.50, 0.03, 0.03, 0.03, 350, 0.40, 1500 },
 };
+constexpr size_t kGloves = 1;
 
 struct HumanStats {
     uint32_t trials = 0, firstTry = 0, failed = 0, cooled = 0;
@@ -511,11 +609,12 @@ double lognormal(Rng& rng, double med, double sigma)
     return med * std::exp(sigma * z);
 }
 
-HumanStats simulateHuman(const Variant& v, const HumanProfile& h, uint32_t trials, uint64_t seed)
+HumanStats simulateHuman(const Variant& v, size_t variantIndex, size_t profile, uint32_t trials, uint64_t seed)
 {
+    const HumanProfile& h = kHumans[profile];
     HumanStats st;
     for (uint32_t trial = 0; trial < trials; ++trial) {
-        Rng rng(mix(seed + trial));
+        Rng rng(humanSeed(seed, variantIndex, profile, trial));
         ButtonLock::UnlockDetector d(v.seq, v.timing);
         d.reset(0);
 
@@ -613,11 +712,13 @@ HumanStats simulateHuman(const Variant& v, const HumanProfile& h, uint32_t trial
                 gap += rng.uniform(1500.0, 4000.0);
             }
             const double next = lastT + gap;
-            const uint32_t timeoutAt = lastT + d.timing().maxGapMs + kFrameMs;
+            // In double: a naive lock's maxGapMs is "never" (0xFFFFFFFF).
+            const double timeoutAt = static_cast<double>(lastT) + d.timing().maxGapMs + kFrameMs;
             if (d.progress() > 0 && next > timeoutAt) {
                 // The guide says "too slow": start over after reading it.
-                d.poll(timeoutAt);
-                lastFrame = std::max(lastFrame, timeoutAt);
+                const uint32_t at = static_cast<uint32_t>(timeoutAt);
+                d.poll(at);
+                lastFrame = std::max(lastFrame, at);
                 t = timeoutAt + h.retryMs;
                 ++attempts;
                 continue;
@@ -639,28 +740,40 @@ HumanStats simulateHuman(const Variant& v, const HumanProfile& h, uint32_t trial
         }
         st.timesS.push_back((unlockAt - start) / 1000.0);
     }
+    std::sort(st.timesS.begin(), st.timesS.end());
     return st;
 }
 
-// --- printing --------------------------------------------------------------------
+double quantile(const HumanStats& st, double q)
+{
+    if (st.timesS.empty()) {
+        return 0.0;
+    }
+    return st.timesS[static_cast<size_t>(q * static_cast<double>(st.timesS.size() - 1))];
+}
+
+// --- levels and printing ---------------------------------------------------------
+
+const std::vector<Model> kModels(kStudyModels.begin(), kStudyModels.end());
 
 struct Level {
-    const char*          name;
-    std::vector<double>  rate;    // per model
+    std::string          name;     // "Harsh", "Calibrated", ...
+    std::vector<double>  rate;     // per model
     uint32_t             hours;
+    unsigned             stream;
+    std::vector<size_t>  active;   // variants run at this level
     std::vector<std::vector<Cell>> cells;   // [model][variant]
     std::vector<Baseline> base;            // [model]
 };
 
-const std::vector<Model> kModels(kStudyModels.begin(), kStudyModels.end());
-
-uint64_t sumUnlocks(const Level& L, size_t v)
+void runLevel(Level& L, uint64_t seed, unsigned threads, const std::vector<Variant>& vars)
 {
-    uint64_t s = 0;
+    L.cells.resize(kModels.size());
+    L.base.resize(kModels.size());
     for (size_t m = 0; m < kModels.size(); ++m) {
-        s += L.cells[m][v].unlocks;
+        runModel(L.stream, kModels[m], L.rate[m], L.hours, seed, threads, vars, L.active, L.cells[m], L.base[m]);
+        std::fprintf(stderr, "%s: %s done\n", L.name.c_str(), shortModel(kModels[m]));
     }
-    return s;
 }
 
 size_t worstModel(const Level& L, size_t v, uint64_t Cell::*field)
@@ -674,77 +787,99 @@ size_t worstModel(const Level& L, size_t v, uint64_t Cell::*field)
     return w;
 }
 
-void printHeader(const char* first)
+/// "r Model" for the worst model, or "0 (<u), every model".
+std::string worst(const Level& L, size_t v, uint64_t Cell::*field, bool ci = false)
 {
-    std::printf("| %s |", first);
+    const size_t   w = worstModel(L, v, field);
+    const uint64_t k = L.cells[w][v].*field;
+    return rate(k, L.hours, ci) + (k ? std::string(" ") + shortModel(kModels[w]) : ", every model");
+}
+
+std::string worstBase(const Level& L, uint64_t Baseline::*field, bool ci = false)
+{
+    size_t w = 0;
+    for (size_t m = 1; m < kModels.size(); ++m) {
+        if (L.base[m].*field > L.base[w].*field) {
+            w = m;
+        }
+    }
+    const uint64_t k = L.base[w].*field;
+    return rate(k, L.hours, ci) + (k ? std::string(" ") + shortModel(kModels[w]) : ", every model");
+}
+
+void printModelHeader(const char* first, const char* extra)
+{
+    std::printf("| %s |%s Worst model |", first, extra);
     for (Model m : kModels) {
         std::printf(" %s |", shortModel(m));
     }
-    std::printf(" all models pooled |\n|---|");
+    std::printf("\n|---|");
+    for (const char* p = extra; *p; ++p) {
+        if (*p == '|') {
+            std::printf("---|");
+        }
+    }
     for (size_t m = 0; m <= kModels.size(); ++m) {
         std::printf("---:|");
     }
     std::printf("\n");
 }
 
-void printUnlockRow(const Level& L, const Variant& var, size_t v, const std::string& label)
+void printModelRow(const Level& L, const std::string& label, const std::string& extra, size_t v, uint64_t Cell::*field)
 {
-    std::printf("| %s |", label.c_str());
-    for (size_t m = 0; m < kModels.size(); ++m) {
-        std::printf(" %s |", rate(L.cells[m][v].unlocks, L.hours).c_str());
-    }
-    std::printf(" %s |\n", rate(sumUnlocks(L, v), static_cast<double>(L.hours) * kModels.size()).c_str());
-    (void)var;
-}
-
-void printConsequenceRow(const Level& L, size_t v, const std::string& label, uint64_t Cell::*field)
-{
-    std::printf("| %s |", label.c_str());
-    uint64_t total = 0;
+    std::printf("| %s |%s %s |", label.c_str(), extra.c_str(), worst(L, v, field).c_str());
     for (size_t m = 0; m < kModels.size(); ++m) {
         std::printf(" %s |", rate(L.cells[m][v].*field, L.hours).c_str());
-        total += L.cells[m][v].*field;
     }
-    std::printf(" %s |\n", rate(total, static_cast<double>(L.hours) * kModels.size()).c_str());
-}
-
-double chiDispersionP(const std::vector<uint64_t>& counts, double* ratio)
-{
-    // Index of dispersion: sum (c - mean)^2 / mean ~ chi2(n-1) under equal rates.
-    const double n = static_cast<double>(counts.size());
-    double mean = 0.0;
-    for (uint64_t c : counts) {
-        mean += static_cast<double>(c);
-    }
-    mean /= n;
-    if (mean <= 0.0) {
-        *ratio = 0.0;
-        return 1.0;
-    }
-    double d = 0.0;
-    for (uint64_t c : counts) {
-        d += (static_cast<double>(c) - mean) * (static_cast<double>(c) - mean) / mean;
-    }
-    const double df = n - 1.0;
-    *ratio = d / df;
-    const double z = (std::cbrt(d / df) - (1.0 - 2.0 / (9.0 * df))) / std::sqrt(2.0 / (9.0 * df));
-    return 0.5 * std::erfc(z / std::sqrt(2.0));
+    std::printf("\n");
 }
 
 } // namespace
 
 int main(int argc, char** argv)
 {
-    const uint32_t hostileHours = argc > 1 ? static_cast<uint32_t>(std::atoi(argv[1])) : 2000u;
+    const uint32_t hostileHours = argc > 1 ? static_cast<uint32_t>(std::atoi(argv[1])) : 10000u;
     const uint32_t calibHours   = argc > 2 ? static_cast<uint32_t>(std::atoi(argv[2])) : hostileHours;
     unsigned threads = argc > 3 ? static_cast<unsigned>(std::atoi(argv[3])) : std::thread::hardware_concurrency();
     if (threads == 0) {
         threads = 4;
     }
     const uint64_t seed = argc > 4 ? std::strtoull(argv[4], nullptr, 0) : 0x5E9u;
+    if (hostileHours == 0 || calibHours == 0) {
+        std::fprintf(stderr, "usage: seq_study [hostile-hours] [calibrated-hours] [threads] [seed]\n");
+        return 2;
+    }
     const auto t0 = std::chrono::steady_clock::now();
 
+    using B = Button;
     const std::vector<Variant> vars = makeVariants();
+    auto key = [&](Family f, std::initializer_list<Button> s, uint32_t hold = 0) {
+        return findVariant(vars, f, steps(s), hold);
+    };
+    const size_t vSix     = key(Family::Six, { B::Up, B::Select, B::Back, B::Down, B::Up, B::Select });
+    const size_t vFive    = key(Family::Five, { B::Up, B::Select, B::Back, B::Down, B::Up });
+    const size_t vDefault = findVariant(vars, Family::Four, ButtonLock::defaultSequence(), 0);
+    const size_t vFourX   = key(Family::Four, { B::Up, B::Back, B::Down, B::Select });
+    const size_t vThree   = key(Family::Three, { B::Up, B::Select, B::Back });
+    const size_t vAbaDiag = key(Family::Three, { B::Up, B::Back, B::Up });
+    const size_t vAbaRow  = key(Family::Three, { B::Up, B::Select, B::Up });
+    const size_t vTwo     = key(Family::Two, { B::Up, B::Select });
+    const size_t vTapH08  = key(Family::TapHold, { B::Up, B::Select }, 800);
+    const size_t vTapH10  = key(Family::TapHold, { B::Up, B::Select }, 1000);
+    const size_t vTwoH08  = key(Family::TwoTapsHold, { B::Up, B::Select, B::Back }, 800);
+    const size_t vTwoH10  = key(Family::TwoTapsHold, { B::Up, B::Select, B::Back }, 1000);
+    const size_t vNaive3  = key(Family::Naive, { B::Up, B::Select, B::Back });
+    const size_t vNaive4  = findVariant(vars, Family::Naive, ButtonLock::defaultSequence(), 0);
+
+    const std::vector<size_t> headline = { vSix, vFive, vDefault, vFourX, vThree, vAbaDiag, vAbaRow, vTwo,
+                                           vTapH08, vTapH10, vTwoH08, vTwoH10, vNaive3, vNaive4 };
+    const std::vector<size_t> summary  = { vTwo, vThree, vDefault, vFive, vSix, vAbaRow, vTapH10, vTwoH10, vNaive3 };
+    const std::vector<size_t> humanSet = { vSix, vFive, vDefault, vThree, vAbaRow, vTwo,
+                                           vTapH08, vTapH10, vTwoH08, vTwoH10, vNaive3 };
+    std::vector<size_t> everyVariant(vars.size());
+    for (size_t v = 0; v < vars.size(); ++v) {
+        everyVariant[v] = v;
+    }
 
     // Calibration: the stock watch opens ~1 activity per hour.
     constexpr double   kTargetOpens = 1.0;
@@ -752,45 +887,55 @@ int main(int argc, char** argv)
     std::vector<double> calRate;
     for (Model m : kModels) {
         calRate.push_back(calibrate(m, kTargetOpens, kCalibHours, seed, threads));
+        std::fprintf(stderr, "calibrated %s: %.4f\n", shortModel(m), calRate.back());
     }
+    auto scaled = [&](double f) {
+        std::vector<double> r = calRate;
+        for (double& x : r) {
+            x *= f;
+        }
+        return r;
+    };
 
     std::vector<Level> levels = {
-        { "hostile (models as written)", std::vector<double>(kModels.size(), 1.0), hostileHours, {}, {} },
-        { "calibrated (stock watch opens ~1 activity/h)", calRate, calibHours, {}, {} },
+        { "Harsh", std::vector<double>(kModels.size(), 1.0), hostileHours, 1, everyVariant, {}, {} },
+        { "Calibrated", calRate, calibHours, 2, everyVariant, {}, {} },
+        { "Calibrated x2", scaled(2.0), calibHours, 3, headline, {}, {} },
+        { "Calibrated x4", scaled(4.0), calibHours, 4, headline, {}, {} },
     };
-    for (unsigned l = 0; l < levels.size(); ++l) {
-        Level& L = levels[l];
-        L.cells.resize(kModels.size());
-        L.base.resize(kModels.size());
-        for (size_t m = 0; m < kModels.size(); ++m) {
-            runModel(l + 1, kModels[m], L.rate[m], L.hours, seed, threads, vars, L.cells[m], L.base[m]);
-            std::fprintf(stderr, "level %u model %s done\n", l, shortModel(kModels[m]));
-        }
+    for (Level& L : levels) {
+        runLevel(L, seed, threads, vars);
     }
+    const Level& harsh = levels[0];
+    const Level& calib = levels[1];
 
-    // Human trials.
-    std::vector<size_t> humanVars;
-    auto findVar = [&](const std::string& label) {
-        for (size_t v = 0; v < vars.size(); ++v) {
-            if (vars[v].label == label) {
-                return v;
+    // Rate sweep of the random-taps model, relative to the harsh level.
+    const std::vector<double> sweepRates = { 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0 };
+    const std::vector<size_t> sweepVars  = { vThree, vDefault, vFive, vSix };
+    std::vector<std::vector<Cell>> sweepCells(sweepRates.size());
+    std::vector<Baseline> sweepBase(sweepRates.size());
+    for (size_t i = 0; i < sweepRates.size(); ++i) {
+        runModel(16 + static_cast<unsigned>(i), Model::RandomTaps, sweepRates[i], calibHours, seed, threads, vars,
+                 sweepVars, sweepCells[i], sweepBase[i]);
+    }
+    std::fprintf(stderr, "rate sweep done\n");
+
+    // A person unlocking: every (variant, profile) pair is its own task.
+    constexpr uint32_t kHumanTrials = 20000;
+    constexpr size_t   kProfiles    = std::size(kHumans);
+    std::vector<HumanStats> human(humanSet.size() * kProfiles);
+    parallelFor(static_cast<uint32_t>(human.size()), threads, [&](uint32_t task, unsigned) {
+        const size_t v = humanSet[task / kProfiles];
+        human[task] = simulateHuman(vars[v], v, task % kProfiles, kHumanTrials, seed);
+    });
+    auto humanOf = [&](size_t v, size_t profile) -> const HumanStats* {
+        for (size_t i = 0; i < humanSet.size(); ++i) {
+            if (humanSet[i] == v) {
+                return &human[i * kProfiles + profile];
             }
         }
-        std::fprintf(stderr, "no variant %s\n", label.c_str());
-        std::exit(2);
+        return nullptr;
     };
-    for (const char* label : { "L1 R1 R2 L2 L1 R1", "L1 R1 R2 L2 L1", "L1 R1 R2 L2", "L1 R1 R2", "L1 R1",
-                               "L1 R1 + hold 0.8 s", "L1 R1 + hold 1.0 s", "L1 R1 R2 + hold 0.8 s",
-                               "L1 R1 R2 + hold 1.0 s" }) {
-        humanVars.push_back(findVar(label));
-    }
-    constexpr uint32_t kHumanTrials = 20000;
-    std::vector<std::vector<HumanStats>> human(humanVars.size());
-    for (size_t i = 0; i < humanVars.size(); ++i) {
-        for (const HumanProfile& h : kHumans) {
-            human[i].push_back(simulateHuman(vars[humanVars[i]], h, kHumanTrials, seed + 0x1000 * i));
-        }
-    }
 
     const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 
@@ -798,128 +943,160 @@ int main(int argc, char** argv)
     std::printf("# Unlock sequence study\n\n");
     std::printf("Generated by `tests/seq_study.cpp`: `seq_study %u %u %u 0x%llx` (%u threads, %.0f s).\n\n",
                 hostileHours, calibHours, threads, static_cast<unsigned long long>(seed), threads, elapsed);
-    std::printf("Every variant runs on the same one-hour rides (common random numbers), %u h per jacket model "
-                "at the hostile level and %u h per model at the calibrated level: %u models, %zu lock variants. "
-                "All of ButtonLock's rules are on (quiet 0.6 s, press < 1.2 s, gap < 2.5 s, chords end the attempt, "
-                "3 rejections in 30 s -> cool-down until 15 s of silence, pinned > 4 s ignored). The lock sees the "
-                "frame-paced stream (10 Hz, 16-deep queue). After a false unlock the open padlock shows for 0.7 s, then the "
-                "watch face has the buttons for **2 min** (relockMs) and the same noise is fed to the stock-watch model and "
-                "to the patched-apps model (5 min pre-activity budget, start = 1.5 s hold of R1 alone); the lock is then "
-                "back up (detector reset).\n\n",
-                hostileHours, calibHours, static_cast<unsigned>(kModels.size()), vars.size());
+    std::printf("Every lock variant runs on the same one-hour rides (common random numbers): %u h per jacket model at the "
+                "harsh level, %u h per model at the calibrated level and at 2x and 4x its rate (candidate locks only), "
+                "%zu models, %zu lock variants. All of ButtonLock's rules are on (quiet 0.6 s, press < 1.2 s, "
+                "gap < 2.5 s, chords end the attempt, 3 rejections in 30 s -> cool-down until 15 s of silence, pinned "
+                "> 4 s ignored). The lock sees the frame-paced stream (10 Hz, 16-deep queue). After a false unlock the "
+                "open padlock shows for 0.7 s, then the watch face has the buttons for **2 min** (relockMs) and the same "
+                "noise is fed to the stock-watch model and to the patched-apps model (5 min pre-activity budget, start = "
+                "1.5 s hold of SELECT alone); then the lock is back up (detector reset).\n\n",
+                hostileHours, calibHours, kModels.size(), vars.size());
+    std::printf("**The consequence window.** Each 2-min window starts on the watch face with nothing open. For a very weak "
+                "lock, which opens again soon after it relocks, an activity opened in an earlier window would in fact still "
+                "be open, so activities opened are overstated for such locks and recordings understated. On the stock apps "
+                "an activity opened in a window stays open, GPS on, behind the relocked screen: each one is a drain that "
+                "lasts until the drain alert or the wearer catches it.\n\n");
     std::printf("Rates are **per 1000 h** of that noise. `r (lo-hi)` is the Poisson 95%% interval; `0 (<u)` is a zero count "
-                "with the 3/N upper bound. Button names: L1 = UP (top left), R1 = SELECT (top right), "
-                "L2 = DOWN (bottom left), R2 = BACK (bottom right).\n\n");
+                "with its 3/N upper bound. Buttons: UP top left, SELECT top right, DOWN bottom left, BACK bottom right. "
+                "*Settings*: whether the app's settings accept the code (they refuse codes under 3 steps or on fewer than "
+                "3 different buttons; holds are not offered). *Worst model*: the jacket model with the highest count "
+                "for that lock and column, named. No pooled (all-model) figures are given: three of the eight models "
+                "(OneSide, Squeeze, Rocker) can never produce a code on three or more different buttons, so pooling "
+                "would dilute the risk.\n\n");
 
     // 1. Noise levels
     std::printf("## 1. Noise levels\n\n");
-    std::printf("Calibration: for each model, the event rate (all intervals between noise events divided by the scale) "
-                "was bisected on %u h so the stock watch, with no lock, opens %.1f activity per hour. The table shows "
-                "what the main runs then measured.\n\n", kCalibHours, kTargetOpens);
-    std::printf("| Model | Hostile: presses/h | Hostile: stock opens/h | Hostile: stock recordings/h | Hostile: patched recordings/h "
-                "| Calibrated: rate scale | Calibrated: presses/h | Calibrated: stock opens/h | Calibrated: stock recordings/h "
-                "| Calibrated: patched recordings/h |\n");
+    std::printf("Calibration: for each model, the event rate (every interval between noise events divided by the scale) "
+                "was bisected on %u h so the stock watch, with no lock, opens %.1f activity per hour. The calibrated point "
+                "is weakly anchored (stock opens saturate as noise rises), hence the 2x and 4x band. Measured in the main "
+                "runs:\n\n", kCalibHours, kTargetOpens);
+    std::printf("| Model | Harsh: presses/h | Harsh: stock opens/h | Calibrated: rate scale | Calibrated: presses/h "
+                "| Calibrated: stock opens/h | x2: presses/h | x2: stock opens/h | x4: presses/h | x4: stock opens/h |\n");
     std::printf("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
     for (size_t m = 0; m < kModels.size(); ++m) {
-        const Baseline& a = levels[0].base[m];
-        const Baseline& b = levels[1].base[m];
-        const double ha = levels[0].hours, hb = levels[1].hours;
-        std::printf("| %s | %.0f | %.2f | %.3f | %.3f | %.3f | %.0f | %.2f | %.3f | %.4f |\n", modelName(kModels[m]),
-                    a.presses / ha, a.opens / ha, a.recs / ha, a.pRecs / ha, levels[1].rate[m], b.presses / hb,
-                    b.opens / hb, b.recs / hb, b.pRecs / hb);
+        std::printf("| %s | %.0f | %s | %.3f |", modelName(kModels[m]),
+                    static_cast<double>(levels[0].base[m].presses) / levels[0].hours,
+                    perHour(levels[0].base[m].opens, levels[0].hours).c_str(), calRate[m]);
+        for (size_t l = 1; l < levels.size(); ++l) {
+            std::printf(" %.0f | %s |", static_cast<double>(levels[l].base[m].presses) / levels[l].hours,
+                        perHour(levels[l].base[m].opens, levels[l].hours).c_str());
+        }
+        std::printf("\n");
+    }
+    std::printf("\nNo lock: recordings started per hour.\n\n");
+    std::printf("| Model | Harsh: stock | Harsh: patched apps | Calibrated: stock | Calibrated: patched apps "
+                "| x2: stock | x4: stock |\n|---|---:|---:|---:|---:|---:|---:|\n");
+    for (size_t m = 0; m < kModels.size(); ++m) {
+        std::printf("| %s | %s | %s | %s | %s | %s | %s |\n", modelName(kModels[m]),
+                    perHour(levels[0].base[m].recs, levels[0].hours).c_str(),
+                    perHour(levels[0].base[m].pRecs, levels[0].hours).c_str(),
+                    perHour(levels[1].base[m].recs, levels[1].hours).c_str(),
+                    perHour(levels[1].base[m].pRecs, levels[1].hours).c_str(),
+                    perHour(levels[2].base[m].recs, levels[2].hours).c_str(),
+                    perHour(levels[3].base[m].recs, levels[3].hours).c_str());
     }
     std::printf("\n");
 
-    // 2. Headline
-    const std::vector<std::string> headline = {
-        "L1 R1 R2 L2 L1 R1", "L1 R1 R2 L2 L1", "L1 R1 R2 L2", "L1 R2 L2 R1", "L1 R1 R2", "L1 R2 L1", "L1 R1 L1",
-        "L1 R1", "L1 R1 + hold 0.8 s", "L1 R1 + hold 1.0 s", "L1 R2 + hold 1.0 s",
-        "L1 R1 R2 + hold 0.8 s", "L1 R1 R2 + hold 1.0 s", "Naive 3-click L1 R1 R2 (no rules)",
-    };
-    std::printf("## 2. Headline: candidate locks\n\n");
-    std::printf("Worst model = the jacket model with the highest count for that column. Pooled = all %zu models "
-                "together (an even mix). Consequences are what the noise did on the watch face during the 2-min "
-                "windows after false unlocks.\n\n", kModels.size());
-    for (const Level& L : levels) {
-        std::printf("### %s\n\n", L.name);
-        std::printf("| Lock | Presses | False unlocks, worst model | False unlocks, pooled | Stock: activities opened, worst model "
-                    "| Stock: activities opened, pooled | Stock: recordings started, worst model | Patched apps: recordings, worst model |\n");
-        std::printf("|---|---:|---:|---:|---:|---:|---:|---:|\n");
-        {
-            size_t wo = 0, wr = 0, wp = 0;
-            uint64_t oAll = 0;
-            for (size_t m = 0; m < kModels.size(); ++m) {
-                if (L.base[m].opens > L.base[wo].opens) wo = m;
-                if (L.base[m].recs > L.base[wr].recs) wr = m;
-                if (L.base[m].pRecs > L.base[wp].pRecs) wp = m;
-                oAll += L.base[m].opens;
-            }
-            std::printf("| *No lock: stock watch* | - | - | - | %s %s | %s | %s %s | %s %s |\n",
-                        rate(L.base[wo].opens, L.hours).c_str(), shortModel(kModels[wo]),
-                        rate(oAll, static_cast<double>(L.hours) * kModels.size()).c_str(),
-                        rate(L.base[wr].recs, L.hours).c_str(), shortModel(kModels[wr]),
-                        rate(L.base[wp].pRecs, L.hours).c_str(), L.base[wp].pRecs ? shortModel(kModels[wp]) : "");
+    // 2. Summary
+    std::printf("## 2. Summary: candidate locks\n\n");
+    std::printf("Worst model for each column, named. Time and first-try success: the gloves profile of §13 (indicative). "
+                "Activities opened: by the noise during the 2-min windows after false unlocks (no lock: by the noise on "
+                "the stock watch).\n\n");
+    std::printf("| Lock | Settings | Presses | Gloves: median time | Gloves: first try | Harsh: false unlocks "
+                "| Harsh: activities opened | Calibrated: false unlocks | Calibrated: activities opened |\n");
+    std::printf("|---|---|---:|---:|---:|---:|---:|---:|---:|\n");
+    for (size_t v : summary) {
+        const HumanStats* g = humanOf(v, kGloves);
+        char tm[32] = "-", ft[32] = "-";
+        if (g != nullptr) {
+            std::snprintf(tm, sizeof(tm), "%.1f s", quantile(*g, 0.5));
+            std::snprintf(ft, sizeof(ft), "%.0f %%", 100.0 * g->firstTry / g->trials);
         }
-        for (const std::string& label : headline) {
-            const size_t v = findVar(label);
-            const size_t wu = worstModel(L, v, &Cell::unlocks);
-            const size_t wo = worstModel(L, v, &Cell::opens);
-            const size_t wr = worstModel(L, v, &Cell::recs);
-            const size_t wp = worstModel(L, v, &Cell::pRecs);
-            uint64_t opensAll = 0;
-            for (size_t m = 0; m < kModels.size(); ++m) {
-                opensAll += L.cells[m][v].opens;
-            }
-            std::printf("| %s | %s | %s %s | %s | %s %s | %s | %s %s | %s %s |\n", label.c_str(), vars[v].presses().c_str(),
-                        rate(L.cells[wu][v].unlocks, L.hours).c_str(), L.cells[wu][v].unlocks ? shortModel(kModels[wu]) : "",
-                        rate(sumUnlocks(L, v), static_cast<double>(L.hours) * kModels.size()).c_str(),
-                        rate(L.cells[wo][v].opens, L.hours).c_str(), L.cells[wo][v].opens ? shortModel(kModels[wo]) : "",
-                        rate(opensAll, static_cast<double>(L.hours) * kModels.size()).c_str(),
-                        rate(L.cells[wr][v].recs, L.hours).c_str(), L.cells[wr][v].recs ? shortModel(kModels[wr]) : "",
-                        rate(L.cells[wp][v].pRecs, L.hours).c_str(), L.cells[wp][v].pRecs ? shortModel(kModels[wp]) : "");
+        std::printf("| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", vars[v].label.c_str(), vars[v].settings,
+                    vars[v].presses().c_str(), tm, ft, worst(harsh, v, &Cell::unlocks).c_str(),
+                    worst(harsh, v, &Cell::opens).c_str(), worst(calib, v, &Cell::unlocks).c_str(),
+                    worst(calib, v, &Cell::opens).c_str());
+    }
+    std::printf("| *No lock: stock watch* | - | 0 | - | - | - | %s | - | %s |\n\n",
+                worstBase(harsh, &Baseline::opens).c_str(), worstBase(calib, &Baseline::opens).c_str());
+
+    // 3. Headline per level, with intervals and every consequence
+    std::printf("## 3. Candidate locks, per level (worst model, with 95%% intervals)\n\n");
+    for (size_t l = 0; l < 2; ++l) {
+        const Level& L = levels[l];
+        std::printf("### %s (%u h per model)\n\n", L.name.c_str(), L.hours);
+        std::printf("| Lock | Settings | Presses | False unlocks | Stock: activities opened | Stock: recordings started "
+                    "| Patched apps: recordings started |\n|---|---|---:|---:|---:|---:|---:|\n");
+        std::printf("| *No lock* | - | - | - | %s | %s | %s |\n", worstBase(L, &Baseline::opens, true).c_str(),
+                    worstBase(L, &Baseline::recs, true).c_str(), worstBase(L, &Baseline::pRecs, true).c_str());
+        for (size_t v : headline) {
+            std::printf("| %s | %s | %s | %s | %s | %s | %s |\n", vars[v].label.c_str(), vars[v].settings,
+                        vars[v].presses().c_str(), worst(L, v, &Cell::unlocks, true).c_str(),
+                        worst(L, v, &Cell::opens, true).c_str(), worst(L, v, &Cell::recs, true).c_str(),
+                        worst(L, v, &Cell::pRecs, true).c_str());
         }
         std::printf("\n");
     }
 
-    // 3. False unlocks per model, every variant except 3+hold (summarised in §5)
-    std::printf("## 3. False unlocks per 1000 h, per model\n\n");
-    for (const Level& L : levels) {
-        std::printf("### %s (%u h per model)\n\n", L.name, L.hours);
-        printHeader("Lock");
-        for (size_t v = 0; v < vars.size(); ++v) {
-            if (vars[v].family == Family::ThreeHold) {
-                continue;
-            }
-            printUnlockRow(L, vars[v], v, vars[v].label);
+    // 4. Calibration band
+    std::printf("## 4. Calibration band: the calibrated level, and 2x and 4x its noise rate\n\n");
+    std::printf("Worst model per cell. The stock watch's own opens (first row) grow far more slowly than the noise.\n\n");
+    std::printf("| Lock | Settings | False unlocks: calibrated | x2 | x4 | Activities opened: calibrated | x2 | x4 |\n");
+    std::printf("|---|---|---:|---:|---:|---:|---:|---:|\n");
+    std::printf("| *No lock: stock watch* | - | - | - | - | %s | %s | %s |\n", worstBase(levels[1], &Baseline::opens).c_str(),
+                worstBase(levels[2], &Baseline::opens).c_str(), worstBase(levels[3], &Baseline::opens).c_str());
+    for (size_t v : headline) {
+        std::printf("| %s | %s | %s | %s | %s | %s | %s | %s |\n", vars[v].label.c_str(), vars[v].settings,
+                    worst(levels[1], v, &Cell::unlocks).c_str(), worst(levels[2], v, &Cell::unlocks).c_str(),
+                    worst(levels[3], v, &Cell::unlocks).c_str(), worst(levels[1], v, &Cell::opens).c_str(),
+                    worst(levels[2], v, &Cell::opens).c_str(), worst(levels[3], v, &Cell::opens).c_str());
+    }
+    std::printf("\nPer model, false unlocks per 1000 h:\n\n");
+    for (size_t l = 1; l < levels.size(); ++l) {
+        std::printf("### %s\n\n", levels[l].name.c_str());
+        printModelHeader("Lock", "");
+        for (size_t v : headline) {
+            printModelRow(levels[l], vars[v].label, "", v, &Cell::unlocks);
         }
         std::printf("\n");
     }
 
-    // 3b. Every variant: false unlocks and consequences, pooled and worst model
-    std::printf("## 3b. Every lock: false unlocks and their consequences (per 1000 h; worst model, pooled)\n\n");
-    for (const Level& L : levels) {
-        std::printf("### %s\n\n", L.name);
-        std::printf("| Lock | False unlocks, worst | pooled | Stock opens, worst | pooled | Stock recordings, worst | pooled "
-                    "| Patched recordings, worst | pooled |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|\n");
-        const double pooledH = static_cast<double>(L.hours) * kModels.size();
+    // 5. False unlocks per model
+    std::printf("## 5. False unlocks per 1000 h, per model (every lock but 2 taps + hold, which is in §10)\n\n");
+    for (size_t l = 0; l < 2; ++l) {
+        const Level& L = levels[l];
+        std::printf("### %s (%u h per model)\n\n", L.name.c_str(), L.hours);
+        printModelHeader("Lock", " Settings |");
         for (size_t v = 0; v < vars.size(); ++v) {
-            std::printf("| %s |", vars[v].label.c_str());
-            for (uint64_t Cell::*f : { &Cell::unlocks, &Cell::opens, &Cell::recs, &Cell::pRecs }) {
-                const size_t w = worstModel(L, v, f);
-                uint64_t all = 0;
-                for (size_t m = 0; m < kModels.size(); ++m) {
-                    all += L.cells[m][v].*f;
+            if (vars[v].family != Family::TwoTapsHold) {
+                printModelRow(L, vars[v].label, std::string(" ") + vars[v].settings + " |", v, &Cell::unlocks);
+            }
+        }
+        std::printf("\n");
+    }
+    {
+        std::string never;
+        for (size_t m = 0; m < kModels.size(); ++m) {
+            uint64_t k = 0;
+            for (const Level& L : levels) {
+                for (size_t v : L.active) {
+                    if (vars[v].threeButtons()) {
+                        k += L.cells[m][v].unlocks;
+                    }
                 }
-                std::printf(" %s %s | %s |", rate(L.cells[w][v].*f, L.hours, false).c_str(),
-                            L.cells[w][v].*f ? shortModel(kModels[w]) : "", rate(all, pooledH).c_str());
             }
-            std::printf("\n");
+            if (k == 0) {
+                never += never.empty() ? "" : ", ";
+                never += shortModel(kModels[m]);
+            }
         }
-        std::printf("\n");
+        std::printf("Models that never unlocked any code on three or more different buttons, at any level: %s.\n\n",
+                    never.empty() ? "none" : never.c_str());
     }
 
-    // 4. Consequences per model for the headline variants
-    std::printf("## 4. Consequences per 1000 h, per model (headline locks)\n\n");
+    // 6. Consequences per model
+    std::printf("## 6. Consequences per 1000 h, per model (candidate locks)\n\n");
     struct Metric {
         const char* title;
         uint64_t Cell::*field;
@@ -927,171 +1104,293 @@ int main(int argc, char** argv)
     for (const Metric& metric : { Metric{ "Stock watch: activities opened (GPS on)", &Cell::opens },
                                   Metric{ "Stock watch: recordings started", &Cell::recs },
                                   Metric{ "Patched apps: recordings started", &Cell::pRecs } }) {
-        for (const Level& L : levels) {
-            std::printf("### %s, %s\n\n", metric.title, L.name);
-            printHeader("Lock");
-            for (const std::string& label : headline) {
-                printConsequenceRow(L, findVar(label), label, metric.field);
+        for (size_t l = 0; l < 2; ++l) {
+            std::printf("### %s, %s\n\n", metric.title, levels[l].name.c_str());
+            printModelHeader("Lock", "");
+            for (size_t v : headline) {
+                printModelRow(levels[l], vars[v].label, "", v, metric.field);
             }
             std::printf("\n");
         }
     }
 
-    // 5. 3-step ranking
-    std::printf("## 5. Every valid 3-step sequence, ranked\n\n");
-    std::printf("Ranked by the calibrated pooled count, then the hostile pooled count. Shape: ABA row (A, B on the same row), "
-                "ABA diagonal, or ABC with each move marked - (across a row), x (diagonal), | (same side).\n\n");
-    {
-        std::vector<size_t> three;
+    // 7. Every lock, worst model
+    std::printf("## 7. Every lock: false unlocks and their consequences (per 1000 h, worst model)\n\n");
+    for (size_t l = 0; l < 2; ++l) {
+        const Level& L = levels[l];
+        std::printf("### %s\n\n", L.name.c_str());
+        std::printf("| Lock | Settings | Presses | False unlocks | Stock: activities opened | Stock: recordings started "
+                    "| Patched apps: recordings started |\n|---|---|---:|---:|---:|---:|---:|\n");
         for (size_t v = 0; v < vars.size(); ++v) {
-            if (vars[v].family == Family::Three) {
-                three.push_back(v);
-            }
+            std::printf("| %s | %s | %s | %s | %s | %s | %s |\n", vars[v].label.c_str(), vars[v].settings,
+                        vars[v].presses().c_str(), worst(L, v, &Cell::unlocks).c_str(), worst(L, v, &Cell::opens).c_str(),
+                        worst(L, v, &Cell::recs).c_str(), worst(L, v, &Cell::pRecs).c_str());
         }
-        std::sort(three.begin(), three.end(), [&](size_t a, size_t b) {
-            const uint64_t ca = sumUnlocks(levels[1], a), cb = sumUnlocks(levels[1], b);
-            if (ca != cb) {
-                return ca < cb;
-            }
-            return sumUnlocks(levels[0], a) < sumUnlocks(levels[0], b);
-        });
-        const double pooledH0 = static_cast<double>(levels[0].hours) * kModels.size();
-        const double pooledH1 = static_cast<double>(levels[1].hours) * kModels.size();
-        std::printf("| # | Sequence | SDK names | Shape | Hostile pooled | Hostile worst | Hostile Rocker | Calibrated pooled "
-                    "| Calibrated worst | Calibrated stock opens, pooled |\n");
-        std::printf("|---:|---|---|---|---:|---:|---:|---:|---:|---:|\n");
+        std::printf("\n");
+    }
+
+    // 8. 3-step codes
+    std::printf("## 8. Every 3-step code\n\n");
+    std::vector<size_t> three;
+    for (size_t v = 0; v < vars.size(); ++v) {
+        if (vars[v].family == Family::Three) {
+            three.push_back(v);
+        }
+    }
+    auto worstCount = [&](const Level& L, size_t v) { return L.cells[worstModel(L, v, &Cell::unlocks)][v].unlocks; };
+    std::sort(three.begin(), three.end(), [&](size_t a, size_t b) {
+        const uint64_t ca = worstCount(calib, a), cb = worstCount(calib, b);
+        return ca != cb ? ca < cb : worstCount(harsh, a) < worstCount(harsh, b);
+    });
+    std::printf("Ranked by the calibrated worst-model count, then the harsh one. Shape: ABA row (A and B on the same "
+                "row), ABA diagonal, ABA side, or ABC with each move marked - (across a row), x (diagonal), "
+                "| (along a side).\n\n");
+    std::printf("| # | Code | Shape | Settings | Harsh: false unlocks | Calibrated: false unlocks |\n");
+    std::printf("|---:|---|---|---|---:|---:|\n");
+    {
         int rank = 0;
         for (size_t v : three) {
-            const size_t w0 = worstModel(levels[0], v, &Cell::unlocks);
-            const size_t w1 = worstModel(levels[1], v, &Cell::unlocks);
-            size_t rocker = 0;
-            for (size_t m = 0; m < kModels.size(); ++m) {
-                if (kModels[m] == Model::Rocker) {
-                    rocker = m;
-                }
-            }
-            uint64_t opens1 = 0;
-            for (size_t m = 0; m < kModels.size(); ++m) {
-                opens1 += levels[1].cells[m][v].opens;
-            }
-            std::printf("| %d | %s | %s | %s | %s | %s %s | %s | %s | %s %s | %s |\n", ++rank, vars[v].label.c_str(),
-                        seqSdk(vars[v].seq).c_str(), shapeOf(vars[v].seq).c_str(),
-                        rate(sumUnlocks(levels[0], v), pooledH0).c_str(),
-                        rate(levels[0].cells[w0][v].unlocks, levels[0].hours).c_str(), shortModel(kModels[w0]),
-                        rate(levels[0].cells[rocker][v].unlocks, levels[0].hours).c_str(),
-                        rate(sumUnlocks(levels[1], v), pooledH1).c_str(),
-                        rate(levels[1].cells[w1][v].unlocks, levels[1].hours).c_str(),
-                        levels[1].cells[w1][v].unlocks ? shortModel(kModels[w1]) : "",
-                        rate(opens1, pooledH1).c_str());
+            std::printf("| %d | %s | %s | %s | %s | %s |\n", ++rank, vars[v].label.c_str(), shapeOf(vars[v].seq).c_str(),
+                        vars[v].settings, worst(harsh, v, &Cell::unlocks).c_str(),
+                        worst(calib, v, &Cell::unlocks).c_str());
         }
-        std::printf("\n**Do the 3-step sequences really differ?** Index of dispersion of the 32 counts per model "
-                    "(variance/mean; 1 = what equal rates give) and the p-value of equal rates (chi-square, Wilson-Hilferty). "
-                    "The sequences share the same rides, so this is indicative.\n\n");
-        std::printf("| Level | Model | All 32: dispersion | All 32: p | The 24 ABC only: dispersion | ABC only: p |\n");
-        std::printf("|---|---|---:|---:|---:|---:|\n");
-        for (const Level& L : levels) {
-            for (size_t m = 0; m < kModels.size(); ++m) {
-                std::vector<uint64_t> all, noRow;
-                for (size_t v : three) {
-                    all.push_back(L.cells[m][v].unlocks);
-                    if (shapeOf(vars[v].seq).rfind("ABC", 0) == 0) {
-                        noRow.push_back(L.cells[m][v].unlocks);
-                    }
-                }
-                double r1 = 0, r2 = 0;
-                const double p1 = chiDispersionP(all, &r1);
-                const double p2 = chiDispersionP(noRow, &r2);
-                std::printf("| %s | %s | %.2f | %.2g | %.2f | %.2g |\n", L.name, shortModel(kModels[m]), r1, p1, r2, p2);
-            }
+    }
+    std::printf("\nBy shape class: mean false unlocks per code of the class, per 1000 h.\n\n");
+    auto shapeClass = [&](size_t v) {
+        const std::string s = shapeOf(vars[v].seq);
+        return s.rfind("ABC", 0) == 0 ? std::string("ABC (three buttons)") : s;
+    };
+    for (size_t l = 0; l < 2; ++l) {
+        const Level& L = levels[l];
+        std::printf("### %s\n\n", L.name.c_str());
+        std::printf("| Shape class | Codes |");
+        for (Model m : kModels) {
+            std::printf(" %s |", shortModel(m));
+        }
+        std::printf("\n|---|---:|");
+        for (size_t m = 0; m < kModels.size(); ++m) {
+            std::printf("---:|");
         }
         std::printf("\n");
-
-        // shape classes pooled
-        std::printf("By shape (mean per sequence of the class, per 1000 h, pooled over models):\n\n");
-        std::printf("| Shape class | Sequences | Hostile | Calibrated |\n|---|---:|---:|---:|\n");
-        std::map<std::string, std::pair<uint64_t, uint64_t>> byClass;
-        std::map<std::string, int> nClass;
+        std::map<std::string, std::vector<size_t>> classes;
         for (size_t v : three) {
-            std::string cls = shapeOf(vars[v].seq);
-            if (cls.rfind("ABC", 0) == 0) {
-                cls = "ABC (three buttons)";
-            }
-            byClass[cls].first += sumUnlocks(levels[0], v);
-            byClass[cls].second += sumUnlocks(levels[1], v);
-            nClass[cls]++;
+            classes[shapeClass(v)].push_back(v);
         }
-        for (const auto& [cls, c] : byClass) {
-            const int n = nClass[cls];
-            std::printf("| %s | %d | %s | %s |\n", cls.c_str(), n, rate(c.first, pooledH0 * n).c_str(),
-                        rate(c.second, pooledH1 * n).c_str());
+        for (const auto& [cls, members] : classes) {
+            std::printf("| %s | %zu |", cls.c_str(), members.size());
+            for (size_t m = 0; m < kModels.size(); ++m) {
+                uint64_t k = 0;
+                for (size_t v : members) {
+                    k += L.cells[m][v].unlocks;
+                }
+                // Mean per code; a zero gets the per-code bound (the codes share rides).
+                std::printf(" %s |", k ? num(1000.0 * k / (static_cast<double>(L.hours) * members.size())).c_str()
+                                       : rate(0, L.hours).c_str());
+            }
+            std::printf("\n");
         }
         std::printf("\n");
     }
-
-    // 6. Hold to finish
-    std::printf("## 6. Hold to finish\n\n");
-    std::printf("The last step must be held alone for H and released before 4 s (stuckMs); another press during it is a "
-                "chord. Only `Taps+Holds`, `OneSide` and `Chaos` ever produce presses over 0.5 s on their own, and "
-                "`OneSide` cannot produce a two-sided sequence, so the hold is tested mainly by `Taps+Holds` "
-                "(a quarter of all random presses held 0.5-3 s).\n\n");
-    for (const Level& L : levels) {
-        std::printf("### %s: family summary (per sequence, per 1000 h)\n\n", L.name);
-        std::printf("| Family | H | Sequences | Pooled per sequence | Worst sequence on its worst model | Taps+Holds per sequence |\n");
-        std::printf("|---|---:|---:|---:|---:|---:|\n");
-        size_t th = 0;
+    std::printf("**The 24 codes on three different buttons (the 3-step codes the settings accept): measured range.** "
+                "Every model that can produce them treats the four buttons alike, so they have the same expected rate. "
+                "They are measured on the same rides, so their counts are correlated and no independent-Poisson test "
+                "applies; this is the spread that was measured. SD: the standard deviation across the 24 codes, as a "
+                "share of their mean.\n\n");
+    std::printf("| Level | Model | Lowest | Highest | Mean | SD | Highest/lowest - 1 |\n|---|---|---:|---:|---:|---:|---:|\n");
+    for (size_t l = 0; l < 2; ++l) {
+        const Level& L = levels[l];
         for (size_t m = 0; m < kModels.size(); ++m) {
-            if (kModels[m] == Model::TapsAndHolds) {
-                th = m;
+            std::vector<double> k;
+            for (size_t v : three) {
+                if (vars[v].threeButtons()) {
+                    k.push_back(static_cast<double>(L.cells[m][v].unlocks));
+                }
             }
+            const double lo = *std::min_element(k.begin(), k.end());
+            const double hi = *std::max_element(k.begin(), k.end());
+            if (hi == 0.0) {
+                std::printf("| %s | %s | 0 (<%s) for all %zu | | | | |\n", L.name.c_str(), shortModel(kModels[m]),
+                            num(3000.0 / L.hours).c_str(), k.size());
+                continue;
+            }
+            double mean = 0.0, var = 0.0;
+            for (double x : k) {
+                mean += x / static_cast<double>(k.size());
+            }
+            for (double x : k) {
+                var += (x - mean) * (x - mean) / static_cast<double>(k.size() - 1);
+            }
+            char sd[32], spread[32] = "-";
+            std::snprintf(sd, sizeof(sd), "%.1f %%", 100.0 * std::sqrt(var) / mean);
+            if (lo > 0.0) {
+                std::snprintf(spread, sizeof(spread), "%.0f %%", 100.0 * (hi / lo - 1.0));
+            }
+            std::printf("| %s | %s | %s | %s | %s | %s | %s |\n", L.name.c_str(), shortModel(kModels[m]),
+                        rate(static_cast<uint64_t>(lo), L.hours).c_str(), rate(static_cast<uint64_t>(hi), L.hours).c_str(),
+                        num(1000.0 * mean / L.hours).c_str(), sd, spread);
         }
-        for (Family f : { Family::Three, Family::TwoHold, Family::ThreeHold }) {
-            for (uint32_t hold : { 0u, 800u, 1000u }) {
-                if ((f == Family::Three) != (hold == 0)) {
+    }
+    std::printf("\n");
+
+    // 9. By family, and the per-step factor
+    struct Group {
+        std::string         name;
+        uint32_t            hold;
+        std::vector<size_t> members;
+    };
+    auto groupOf = [&](const std::string& name, Family f, uint32_t hold, int buttons) {
+        Group g{ name, hold, {} };
+        for (size_t v = 0; v < vars.size(); ++v) {
+            if (vars[v].family != f || vars[v].holdMs != hold) {
+                continue;
+            }
+            const size_t n = distinctButtons(vars[v].seq);
+            if ((buttons == 2 && n > 2) || (buttons == 3 && n != 3) || (buttons == 4 && n != 4)) {
+                continue;
+            }
+            g.members.push_back(v);
+        }
+        return g;
+    };
+    const std::vector<Group> groups = {
+        groupOf("2 taps", Family::Two, 0, 0),
+        groupOf("3 taps, three buttons", Family::Three, 0, 3),
+        groupOf("3 taps, two buttons", Family::Three, 0, 2),
+        groupOf("4 taps, four buttons", Family::Four, 0, 4),
+        groupOf("4 taps, two buttons", Family::Four, 0, 2),
+        groupOf("5 taps", Family::Five, 0, 0),
+        groupOf("6 taps", Family::Six, 0, 0),
+        groupOf("1 tap + hold", Family::TapHold, 800, 0),
+        groupOf("1 tap + hold", Family::TapHold, 1000, 0),
+        groupOf("2 taps + hold, three buttons", Family::TwoTapsHold, 800, 3),
+        groupOf("2 taps + hold, three buttons", Family::TwoTapsHold, 1000, 3),
+        groupOf("2 taps + hold, two buttons", Family::TwoTapsHold, 800, 2),
+        groupOf("2 taps + hold, two buttons", Family::TwoTapsHold, 1000, 2),
+    };
+    auto groupCount = [&](const Level& L, const Group& g, size_t m) {
+        uint64_t k = 0;
+        for (size_t v : g.members) {
+            k += L.cells[m][v].unlocks;
+        }
+        return k;
+    };
+    auto groupMean = [&](const Level& L, const Group& g, size_t m) {   // per code, per 1000 h
+        return 1000.0 * static_cast<double>(groupCount(L, g, m)) / (static_cast<double>(L.hours) * g.members.size());
+    };
+    std::printf("## 9. By family: mean false unlocks per code, per 1000 h\n\n");
+    std::printf("A family's codes are alike to every model that treats the four buttons alike (all but OneSide and "
+                "Rocker), so its mean is a steadier figure than any one code's. A zero is shown with one code's 3/N "
+                "bound (the codes share rides).\n\n");
+    for (size_t l = 0; l < 2; ++l) {
+        const Level& L = levels[l];
+        std::printf("### %s\n\n| Family | H | Codes | Worst code on its worst model |", L.name.c_str());
+        for (Model m : kModels) {
+            std::printf(" %s |", shortModel(m));
+        }
+        std::printf("\n|---|---:|---:|---|");
+        for (size_t m = 0; m < kModels.size(); ++m) {
+            std::printf("---:|");
+        }
+        std::printf("\n");
+        for (const Group& g : groups) {
+            uint64_t worstK = 0;
+            size_t worstV = g.members.front(), worstM = 0;
+            for (size_t v : g.members) {
+                for (size_t m = 0; m < kModels.size(); ++m) {
+                    if (L.cells[m][v].unlocks > worstK) {
+                        worstK = L.cells[m][v].unlocks;
+                        worstV = v;
+                        worstM = m;
+                    }
+                }
+            }
+            const std::string w = worstK ? rate(worstK, L.hours) + " " + vars[worstV].label + ", " + shortModel(kModels[worstM])
+                                         : rate(0, L.hours) + ", every code";
+            std::printf("| %s | %s | %zu | %s |", g.name.c_str(), g.hold ? (g.hold == 800 ? "0.8 s" : "1.0 s") : "-",
+                        g.members.size(), w.c_str());
+            for (size_t m = 0; m < kModels.size(); ++m) {
+                std::printf(" %s |", groupCount(L, g, m) ? num(groupMean(L, g, m)).c_str() : rate(0, L.hours).c_str());
+            }
+            std::printf("\n");
+        }
+        std::printf("\n");
+    }
+    std::printf("**Per-step factor**: the family mean at n taps divided by the mean at n + 1 taps (2 taps; 3 taps on "
+                "three buttons; 4 taps on four buttons; 5; 6). `>x` when the longer one had no false unlock (against "
+                "its 3/N bound) and that bound says something; `-` otherwise. Models that never open a code on three "
+                "buttons at that level are left out.\n\n");
+    std::printf("| Level | Model | 2 -> 3 | 3 -> 4 | 4 -> 5 | 5 -> 6 |\n|---|---|---:|---:|---:|---:|\n");
+    {
+        const Group* chain[5] = { &groups[0], &groups[1], &groups[3], &groups[5], &groups[6] };
+        for (size_t l = 0; l < 2; ++l) {
+            const Level& L = levels[l];
+            for (size_t m = 0; m < kModels.size(); ++m) {
+                if (groupCount(L, *chain[1], m) == 0) {
                     continue;
                 }
-                uint64_t pooled = 0, thCount = 0, worst = 0;
-                size_t worstV = 0, worstM = 0;
-                int n = 0;
-                for (size_t v = 0; v < vars.size(); ++v) {
-                    if (vars[v].family != f || vars[v].holdMs != hold) {
-                        continue;
+                std::printf("| %s | %s |", L.name.c_str(), shortModel(kModels[m]));
+                for (size_t i = 0; i + 1 < 5; ++i) {
+                    const uint64_t a = groupCount(L, *chain[i], m), b = groupCount(L, *chain[i + 1], m);
+                    char buf[32] = "-";
+                    if (a > 0 && b > 0) {
+                        std::snprintf(buf, sizeof(buf), "%.1f", groupMean(L, *chain[i], m) / groupMean(L, *chain[i + 1], m));
+                    } else if (a > 0 && groupMean(L, *chain[i], m) / (3000.0 / L.hours) >= 1.0) {
+                        std::snprintf(buf, sizeof(buf), ">%.1f", groupMean(L, *chain[i], m) / (3000.0 / L.hours));
                     }
-                    ++n;
-                    pooled += sumUnlocks(L, v);
-                    thCount += L.cells[th][v].unlocks;
-                    for (size_t m = 0; m < kModels.size(); ++m) {
-                        if (L.cells[m][v].unlocks >= worst) {
-                            worst = L.cells[m][v].unlocks;
-                            worstV = v;
-                            worstM = m;
-                        }
-                    }
+                    std::printf(" %s |", buf);
                 }
-                const char* fname = f == Family::Three ? "3 clicks" : (f == Family::TwoHold ? "2 + hold" : "3 + hold");
-                std::printf("| %s | %s | %d | %s | %s (%s, %s) | %s |\n", fname, hold ? (hold == 800 ? "0.8 s" : "1.0 s") : "-",
-                            n, rate(pooled, static_cast<double>(L.hours) * kModels.size() * n).c_str(),
-                            rate(worst, L.hours).c_str(), vars[worstV].label.c_str(), shortModel(kModels[worstM]),
-                            rate(thCount, static_cast<double>(L.hours) * n).c_str());
+                std::printf("\n");
             }
         }
-        std::printf("\n");
     }
-    for (const Level& L : levels) {
-        std::printf("### %s: 3 + hold, per model (false unlocks per 1000 h)\n\n", L.name);
-        printHeader("Lock");
+    std::printf("\n");
+
+    // 10. Hold to finish
+    std::printf("## 10. Hold to finish\n\n");
+    std::printf("The last step must be held alone for H and released before 4 s (stuckMs); another press during it is a "
+                "chord. *1 tap + hold* is e.g. \"UP, then hold SELECT\" (2 presses); *2 taps + hold* is e.g. \"UP SELECT, "
+                "then hold BACK\" (3 presses). Only `Taps+Holds`, `OneSide` and `Chaos` produce presses over 0.5 s on "
+                "their own, and `OneSide` cannot produce a two-sided code, so the hold is tested mainly by `Taps+Holds` "
+                "(a quarter of all random presses held 0.5-3 s). Family means are in §9. A hold also needs an indicator "
+                "on screen that says when it is long enough.\n\n");
+    for (size_t l = 0; l < 2; ++l) {
+        std::printf("### %s: every 2 taps + hold code, per model (false unlocks per 1000 h)\n\n", levels[l].name.c_str());
+        printModelHeader("Lock", "");
         for (size_t v = 0; v < vars.size(); ++v) {
-            if (vars[v].family == Family::ThreeHold) {
-                printUnlockRow(L, vars[v], v, vars[v].label);
+            if (vars[v].family == Family::TwoTapsHold) {
+                printModelRow(levels[l], vars[v].label, "", v, &Cell::unlocks);
             }
         }
         std::printf("\n");
     }
 
-    // 7. Deafness
-    std::printf("## 7. Share of time the lock is cooling down (a person is told to wait)\n\n");
-    for (const Level& L : levels) {
-        std::printf("### %s\n\n", L.name);
-        std::printf("| Lock |");
+    // 11. Rate sweep
+    std::printf("## 11. Rate sweep: random taps (any button), %u h per point\n\n", calibHours);
+    std::printf("The harsh level is one tap every 6 s on average (scale 1). False unlocks per 1000 h.\n\n");
+    std::printf("| Mean gap between taps | Scale | Presses/h | Stock opens/h |");
+    for (size_t v : sweepVars) {
+        std::printf(" %s |", vars[v].label.c_str());
+    }
+    std::printf("\n|---:|---:|---:|---:|");
+    for (size_t i = 0; i < sweepVars.size(); ++i) {
+        std::printf("---:|");
+    }
+    std::printf("\n");
+    for (size_t i = 0; i < sweepRates.size(); ++i) {
+        std::printf("| %.1f s | %.2f | %.0f | %s |", 6.0 / sweepRates[i], sweepRates[i],
+                    static_cast<double>(sweepBase[i].presses) / calibHours, perHour(sweepBase[i].opens, calibHours).c_str());
+        for (size_t v : sweepVars) {
+            std::printf(" %s |", rate(sweepCells[i][v].unlocks, calibHours).c_str());
+        }
+        std::printf("\n");
+    }
+    std::printf("\n");
+
+    // 12. Deafness
+    std::printf("## 12. Share of time the lock is cooling down (a person is told to wait)\n\n");
+    for (size_t l = 0; l < 2; ++l) {
+        const Level& L = levels[l];
+        std::printf("### %s\n\n| Lock |", L.name.c_str());
         for (Model m : kModels) {
             std::printf(" %s |", shortModel(m));
         }
@@ -1100,9 +1399,8 @@ int main(int argc, char** argv)
             std::printf("---:|");
         }
         std::printf("\n");
-        for (const char* label : { "L1 R1 R2 L2 L1 R1", "L1 R1 R2 L2", "L1 R1 R2", "L1 R1 + hold 1.0 s", "L1 R1 R2 + hold 1.0 s" }) {
-            const size_t v = findVar(label);
-            std::printf("| %s |", label);
+        for (size_t v : { vSix, vFive, vDefault, vThree, vTapH10, vTwoH10 }) {
+            std::printf("| %s |", vars[v].label.c_str());
             for (size_t m = 0; m < kModels.size(); ++m) {
                 std::printf(" %.1f %% |", 100.0 * L.cells[m][v].deafMs / (static_cast<double>(L.hours) * kHour));
             }
@@ -1111,50 +1409,55 @@ int main(int argc, char** argv)
         std::printf("\n");
     }
 
-    // 8. Human cost
-    std::printf("## 8. Cost to a person\n\n");
-    std::printf("Formula: 0.6 s quiet + 0.5 s per click (gloves) + the hold and ~0.3 s to let go. Simulation: %u attempts "
-                "per profile through the same detector and frame pacing, starting from a quiet watch. A person retries "
-                "after a rejection (1.5 s to read it), restarts after a \"too slow\" timeout, and waits out a cool-down.\n\n",
+    // 13. Human cost
+    std::printf("## 13. Cost to a person\n\n");
+    std::printf("Formula: 0.6 s quiet + 0.5 s per tap (gloves) + the hold and ~0.3 s to let go. Simulation: %u attempts "
+                "per lock and profile through the same detector and frame pacing, starting from a quiet watch, each "
+                "with its own random stream. A person retries after a rejection (1.5 s to read it), restarts after a "
+                "\"too slow\" timeout, and waits out a cool-down. The profiles are invented, not measured.\n\n",
                 kHumanTrials);
     for (const HumanProfile& h : kHumans) {
         std::printf("- **%s**: tap %.0f ms median (sigma %.2f), gap %.0f ms median (sigma %.2f), %.0f%% of gaps get an "
-                    "extra 1.5-4 s pause, %.1f%% of presses slip (half another button, half a chord), %.0f%% of holds let go "
-                    "early, let go %.0f ms after the hold indicator completes.\n",
+                    "extra 1.5-4 s pause, %.1f%% of presses slip (half another button, half a chord), %.0f%% of holds let "
+                    "go early, let go %.0f ms after the hold indicator completes.\n",
                     h.name, h.pressMedMs, h.pressSigma, h.gapMedMs, h.gapSigma, 100 * h.hesitateP, 100 * h.slipP,
                     100 * h.earlyP, h.reactMedMs);
     }
     std::printf("\n| Lock | Presses | Formula (gloves) | Profile | First try succeeds | Median time | 95th pct time "
                 "| Mean presses used | Hit a cool-down | Not unlocked in 2 min |\n");
     std::printf("|---|---:|---:|---|---:|---:|---:|---:|---:|---:|\n");
-    for (size_t i = 0; i < humanVars.size(); ++i) {
-        const Variant& var = vars[humanVars[i]];
-        const double formula = 0.6 + 0.5 * var.clicks() + (var.holdMs ? var.holdMs / 1000.0 + 0.3 : 0.0);
-        for (size_t p = 0; p < std::size(kHumans); ++p) {
-            HumanStats st = human[i][p];
-            std::sort(st.timesS.begin(), st.timesS.end());
-            const double med = st.timesS.empty() ? 0 : st.timesS[st.timesS.size() / 2];
-            const double p95 = st.timesS.empty() ? 0 : st.timesS[st.timesS.size() * 95 / 100];
-            std::printf("| %s | %s | %.1f s | %s | %.1f %% | %.1f s | %.1f s | %.2f | %.2f %% | %.3f %% |\n",
-                        var.label.c_str(), var.presses().c_str(), formula, kHumans[p].name, 100.0 * st.firstTry / st.trials, med, p95,
-                        static_cast<double>(st.presses) / st.trials, 100.0 * st.cooled / st.trials,
-                        100.0 * st.failed / st.trials);
+    for (size_t i = 0; i < humanSet.size(); ++i) {
+        const Variant& var = vars[humanSet[i]];
+        const double formula = 0.6 + 0.5 * var.taps() + (var.holdMs ? var.holdMs / 1000.0 + 0.3 : 0.0);
+        for (size_t p = 0; p < kProfiles; ++p) {
+            const HumanStats& st = human[i * kProfiles + p];
+            std::printf("| %s | %s | %.1f s | %s | %.1f %% | %.1f s | %.1f s | %.2f | %s | %s |\n", var.label.c_str(),
+                        var.presses().c_str(), formula, kHumans[p].name, 100.0 * st.firstTry / st.trials,
+                        quantile(st, 0.5), quantile(st, 0.95), static_cast<double>(st.presses) / st.trials,
+                        percent(st.cooled, st.trials).c_str(), percent(st.failed, st.trials).c_str());
         }
     }
     std::printf("\nTimes run from the first press to the unlock; add up to 0.6 s if a button was touched just before "
                 "(the quiet rule). Ways the rules reject a careful person: a pause over 2.5 s between steps (timeout), "
                 "a press over 1.2 s (gloves), a second button brushed while pressing (chord), starting within 0.6 s of "
                 "touching anything (not quiet), and with a hold: letting go before H, or holding past 4 s. Three of these "
-                "within 30 s start a cool-down: 15 s of not touching anything.\n\n");
+                "within 30 s start a cool-down: 15 s of not touching anything. A hold also needs an indicator on screen "
+                "that says when it is long enough.\n\n");
 
-    // 9. Notes
-    std::printf("## 9. Model notes\n\n");
-    std::printf("- The hostile level is the original models; the calibrated level divides every interval between noise events "
-                "by the rate scale in §1 (press lengths and taps within a burst unchanged).\n");
-    std::printf("- Each 2-min window starts on the watch face (Home) with nothing open; an activity opened in a window stays "
-                "open behind the lock when it comes back (only its opening is counted, not its GPS time).\n");
+    // 14. Notes
+    std::printf("## 14. Model notes\n\n");
+    std::printf("- The harsh level is the models as written; the calibrated level divides every interval between noise "
+                "events by the rate scale in §1 (press lengths and taps within a burst unchanged); x2 and x4 multiply "
+                "that scale.\n");
+    std::printf("- Each 2-min consequence window starts on the watch face with nothing open, so activities opened are "
+                "overstated for very weak locks (an earlier one would still be open) and recordings understated. On the "
+                "stock apps an activity opened in a window stays open, GPS on, behind the relocked screen; only its "
+                "opening is counted here, not its GPS time.\n");
     std::printf("- Consequence intervals are Poisson intervals on the count, slightly narrow because opens cluster in "
                 "windows.\n");
-    std::printf("- `Taps+Holds` and `Rocker` are new in this study; the other six are the models of docs/jacket-report.md.\n");
+    std::printf("- Every lock variant sees the same rides, so differences between locks are not blurred by different "
+                "noise, but their counts are correlated.\n");
+    std::printf("- `Taps+Holds` and `Rocker` are new in this study; the other six are the models of "
+                "docs/jacket-report.md. All eight are invented; nobody has recorded what a cuff does.\n");
     return 0;
 }
