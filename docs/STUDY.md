@@ -347,7 +347,7 @@ What the numbers say:
 
 The first version asked for six presses. That number was chosen to drive these
 hostile models to zero, not because anything required it, and in use six presses
-felt like too many. `tests/seq_study.cpp` measures 124 variants over the same
+felt like too many. `tests/seq_study.cpp` measures 146 variants over the same
 models and two more (taps with holds, a cuff rocking across two buttons), at the
 hostile rate and slowed until a stock watch opens about one activity an hour. It
 also counts what the noise does on the watch face in the two minutes before the
@@ -358,7 +358,7 @@ independent implementation agrees within about 3 %.
   given order 1 time in 64, but a cuff makes hundreds of tries an hour: with no
   rules, three presses unlock by themselves several times an hour.
 - **With the rules, three presses** unlock about once per 4 h of the harshest
-  noise and once per 70 h at the milder level; **four** about once per 50 h and
+  noise and once per 80 h at the milder level; **four** about once per 50 h and
   once per 800 h. Which level is real is exactly what nobody has measured, and
   four is the length that is fine across the whole range.
 - **Codes on two buttons** (UP SELECT UP, say) are thousands of times weaker: a

@@ -31,10 +31,13 @@ enum class Button : uint8_t {
 inline constexpr size_t kButtonCount = 4;
 
 /// Shortest and longest sequence accepted, and the fewest different buttons
-/// it must use. Every two-step code, and every code on just two buttons (a
-/// cuff rocking across UP and SELECT, say), unlocks by accident hundreds of
-/// times per 1000 h even in docs/sequence-study.md's milder noise; eight
-/// steps is a buffer size. Three different buttons always span both sides.
+/// it must use. Every two-step code, and a code on two neighbouring buttons
+/// (UP SELECT UP, which a cuff rocking across the top row produces), unlocks
+/// by accident hundreds to thousands of times per 1000 h even in
+/// docs/sequence-study.md's milder noise. Two diagonal buttons fare better in
+/// the models, but where a real cuff's edge lies is unknown, so every code on
+/// two buttons is refused. Three different buttons always span both sides.
+/// Eight steps is a buffer size.
 inline constexpr size_t kMinSequence = 3;
 inline constexpr size_t kMaxSequence = 8;
 inline constexpr size_t kMinButtons  = 3;

@@ -170,7 +170,8 @@ hour, and quadrupling it to 4.0. Across the band, four steps stay at or below
   near one press every 4–6 s, which is about where the harsh random-taps model
   sits.
   - At that worst rate: 240, 24, 2.1 and 0.3 per 1000 h for 3, 4, 5 and 6 steps.
-  - The cross-check's own sweep gives about 250, 23, 3 and 0.3.
+  - A reviewer's separate sweep, with its own code, gives about 250, 23, 3
+    and 0.3.
 - **The rules cost deaf time, the same for every length.** At the harsh level,
   the lock spends 59–100 % of the hour cooling down, so a person must first let
   go and wait 15 s. At the realistic level, it is 1–6 %, except under squeezes
@@ -290,6 +291,7 @@ No lock: recordings started per hour.
 | Chaos (taps/holds/chords, 1 per 1.5 s) | 1.00 | 0.44 | 0.16 | 0.06 | 0.37 | 0.72 |
 | Taps and holds (1 per 6 s, 25% held 0.5-3 s) | 0.90 | 0.51 | 0.15 | 0.07 | 0.38 | 0.73 |
 | Rocker (bursts across 2 neighbouring buttons) | 0.35 | 0 (<3.0e-04) | 0.21 | 0 (<3.0e-04) | 0.26 | 0.31 |
+
 ### 3. Candidate locks, per level (worst model, with 95% intervals)
 
 #### Harsh (10000 h per model)
