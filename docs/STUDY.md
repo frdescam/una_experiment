@@ -404,9 +404,6 @@ need firmware with kernel **1.4.0 or newer** (SDK ABI 3).
 2. Delete the RideLock folder, and install ButtonLock as above. Both carry the
    same app ID, so the phone app should treat ButtonLock as the same app; two
    copies side by side would both put a lock up.
-3. The new code, UP SELECT BACK DOWN, is the first four presses of the old one.
-   Extra presses straight after it are swallowed: the lock hands the watch back
-   once the buttons have been still for 0.7 s (3 s at most).
 
 **Locking at once.** Open ButtonLock from Utilities: UP from the watch face,
 scroll to it, SELECT. On firmware 1.4.0 the Utilities menu opens on Settings and
