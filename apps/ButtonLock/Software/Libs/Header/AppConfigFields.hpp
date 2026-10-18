@@ -28,7 +28,7 @@ constexpr const char* kDrainWindowMin  = "drainWindowMinutes";
 constexpr const char* kShowCurrent     = "showCurrent";
 
 /// Longest unlockSequence text accepted. Eight steps of the longest names,
-/// "SELECT DOWN SELECT DOWN SELECT DOWN SELECT DOWN", are 47.
+/// "SELECT DOWN SELECT DOWN SELECT DOWN SELECT BACK", are 47.
 constexpr size_t kSequenceTextMax = 64;
 
 extern const SDK::AppConfig::Field kFields[];

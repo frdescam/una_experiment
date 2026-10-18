@@ -1,8 +1,9 @@
 # ButtonLock
 
 A lock screen for the UNA Watch. While it is up, every button press goes to it,
-so a sleeve, a cuff or a glove cannot start an activity. It unlocks only for a
-deliberate sequence, and the screen lights each button to press next. Why it
+so nothing a sleeve, a cuff or a glove presses reaches the launcher or an
+activity. It unlocks only for a deliberate sequence, and the screen lights each
+button to press next. Why it
 exists and how well it works: [`docs/STUDY.md`](../../docs/STUDY.md); why the
 sequence is four presses: [`docs/sequence-study.md`](../../docs/sequence-study.md).
 

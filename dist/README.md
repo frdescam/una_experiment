@@ -8,7 +8,7 @@ not yet. Check them against `SHA256SUMS`.
 
 | File | What |
 |---|---|
-| `ButtonLock_0.2.0.uapp` | The lock-screen app (Utility, autostarts). Replaces RideLock: remove `RideLock_0.1.0.uapp` first |
+| `ButtonLock_0.2.0.uapp` | The lock-screen app (Utility, autostarts). Replaces RideLock: see `docs/STUDY.md` §7 before removing its folder |
 | `Running_1.5.0-holdstart.uapp` | Stock Run + `patches/activity-apps.patch` |
 | `Cycling_1.5.0-holdstart.uapp` | Stock Bike + the patch |
 | `Hiking_1.5.0-holdstart.uapp` | Stock Hike + the patch |

@@ -11,7 +11,7 @@
  * press next, so the sequence never has to be memorised. Repeated wrong input (a sleeve) turns the padlock red and
  * pauses unlocking until the buttons have been left alone for a while. When
  * the sequence completes, the padlock opens and the GUI exits, handing the
- * watch back.
+ * watch back once the buttons have been still for a moment.
  *
  * If the service's drain watchdog fires, the date line becomes a warning.
  ******************************************************************************

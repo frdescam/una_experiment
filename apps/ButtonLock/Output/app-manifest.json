@@ -10,7 +10,7 @@
   "minKernelVersion": "1.4.0",
   "requiredHardware": [],
   "id": "5CBC53B94083EF7D",
-  "description": "Locks the buttons so a sleeve, cuff or glove cannot start an activity: they do nothing until you press the lit ones in turn. Relocks itself, and warns if something drains the battery behind it.",
+  "description": "Locks the buttons against sleeves, cuffs and gloves: they do nothing until you press the lit ones in turn. Relocks itself, and warns if something drains the battery behind it.",
   "configFile": "app_config.json",
   "configFields": [
     {

@@ -179,7 +179,8 @@ hour, and quadrupling it to 4.0. Across the band, four steps stay at or below
 
 ## 5. Independent cross-check
 
-A separate implementation checked the arithmetic, with:
+A separate program, `tests/seq_crosscheck.cpp`, written without reference to
+`JacketModel.hpp` or `seq_study.cpp`, checked the arithmetic, with:
 
 - its own RNG and noise generators;
 - 2,000,000 h per model;
@@ -240,6 +241,11 @@ False unlocks per 1000 h, random taps / road bumps:
 cmake -S tests -B build-tests -DCMAKE_BUILD_TYPE=Release
 cmake --build build-tests -j"$(nproc)" --target seq_study
 build-tests/seq_study 10000 10000 "$(nproc)" > seq-study.md   # defaults: 10000 h per model, seed 0x5e9
+
+# the cross-check (§5): 2,000,000 h per model takes a few minutes per model
+cmake --build build-tests -j"$(nproc)" --target seq_crosscheck
+build-tests/seq_crosscheck taps 2000000 1 "$(nproc)"
+build-tests/seq_crosscheck bumps 2000000 1 "$(nproc)"
 ```
 
 - The run takes about 100 s on 4 cores in a Release build. A Debug build (what

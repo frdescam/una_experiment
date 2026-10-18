@@ -65,7 +65,7 @@ single click, or two without a fix. Now:
   opening: closing`, and `Gps.Loc ... stopped`.
 - The jacket model (`docs/STUDY.md` §6.2): with the patch, recordings started by
   taps, bumps, squeezes and pinned buttons go to zero, and GPS-on time drops from
-  72–93 % to 4–21 % of a ride. A single-button *hold* still starts an activity
+  72–93 % to 14–21 % of a ride (squeezes: 16 % to 4 %). A single-button *hold* still starts an activity
   (one-sided rubbing: 0.49/h). That is why the patch is a second layer behind
   ButtonLock, not a replacement for it.
 

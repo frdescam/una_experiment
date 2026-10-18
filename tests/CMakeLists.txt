@@ -62,3 +62,8 @@ find_package(Threads REQUIRED)
 add_executable(seq_study seq_study.cpp)
 target_include_directories(seq_study PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(seq_study PRIVATE buttonlock_core Threads::Threads)
+
+# Its independent cross-check (docs/sequence-study.md section 5):
+# seq_crosscheck taps|bumps <hours> <seed> <threads> [nopace]
+add_executable(seq_crosscheck seq_crosscheck.cpp)
+target_link_libraries(seq_crosscheck PRIVATE buttonlock_core Threads::Threads)

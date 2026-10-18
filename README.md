@@ -23,7 +23,7 @@ Buttons have UNA's names: **UP** (top left), **SELECT** (top right), **DOWN**
   app for any sleeve, cuff or glove.
   - While locked it is in front of everything, so the presses go to it.
   - It unlocks only for **UP SELECT BACK DOWN**, once round the case, with the
-    next button lit on screen, plus rules a sleeve can't satisfy.
+    next button lit on screen, plus rules that keep a sleeve out.
   - It relocks itself, comes up locked after a reboot, and warns if the battery
     drains behind it.
 - **Fix 2: [a patch](patches) for the stock Run, Bike and Hike apps.**
@@ -48,7 +48,9 @@ Buttons have UNA's names: **UP** (top left), **SELECT** (top right), **DOWN**
 
 Prebuilt `.uapp` files are in [`dist/`](dist), with checksums. To install,
 copy `ButtonLock_0.2.0.uapp` into a new `Apps/ButtonLock/` folder over USB and
-power-cycle the watch. Coming from RideLock, delete its folder first. Details, calibration and how to revert:
+power-cycle the watch. Coming from RideLock: move any `app_config.json` across
+without its old six-press `unlockSequence` line, then delete the RideLock folder.
+Details, calibration and how to revert:
 [`docs/STUDY.md` §7](docs/STUDY.md#7-trying-it-on-a-watch).
 
 ## Build and test

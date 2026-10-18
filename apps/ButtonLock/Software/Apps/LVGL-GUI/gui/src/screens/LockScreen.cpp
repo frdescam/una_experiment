@@ -29,10 +29,12 @@ using ButtonLock::Outcome;
 namespace
 {
 
-constexpr uint32_t kTimerPeriodMs  = 200;    ///< guide and countdown refresh
-constexpr uint32_t kGuideMs        = 8000;   ///< the guide stays this long after the last press
-constexpr uint32_t kFlashMs        = 2500;   ///< feedback after a rejected attempt
-constexpr uint32_t kUnlockedShowMs = 700;    ///< the open padlock, before handing back
+constexpr uint32_t kTimerPeriodMs   = 200;    ///< guide and countdown refresh
+constexpr uint32_t kGuideMs         = 8000;   ///< the guide stays this long after the last press
+constexpr uint32_t kFlashMs         = 2500;   ///< feedback after a rejected attempt
+constexpr uint32_t kUnlockedShowMs  = 700;    ///< the open padlock, before handing back...
+constexpr uint32_t kUnlockedQuietMs = 700;    ///< ...once no button has moved for this long...
+constexpr uint32_t kUnlockedMaxMs   = 3000;   ///< ...or after this, whatever the buttons do
 
 constexpr int32_t  kDotY       = 198;
 constexpr int32_t  kDotSpacing = 18;
@@ -190,13 +192,21 @@ void LockScreen::keyEventCb(lv_event_t* e)
 
 void LockScreen::onKey(uint8_t code)
 {
-    Button button;
-    Input  input;
-    if (mMode == Mode::Unlocked || !decodeKey(code, button, input)) {
+    const uint32_t now = lv_tick_get();
+    if (mMode == Mode::Unlocked) {
+        // Swallowed, and the hand-back waits for them to stop: a wearer used
+        // to a longer sequence (RideLock's was six presses) would otherwise
+        // send the extra ones to the watch face, where SELECT opens the
+        // activity list.
+        mLastKeyAt = now;
         return;
     }
 
-    const uint32_t now = lv_tick_get();
+    Button button;
+    Input  input;
+    if (!decodeKey(code, button, input)) {
+        return;
+    }
     mLastKeyAt = now;
     apply(mDetector.onInput(button, input, now), now);
 }
@@ -216,11 +226,13 @@ void LockScreen::onTimer()
     }
 
     switch (mMode) {
-        case Mode::Unlocked:
-            if (now - mModeSince >= kUnlockedShowMs) {
+        case Mode::Unlocked: {
+            const uint32_t shown = now - mModeSince;
+            if ((shown >= kUnlockedShowMs && now - mLastKeyAt >= kUnlockedQuietMs) ||
+                shown >= kUnlockedMaxMs) {
                 mModel.unlockAndExit();
             }
-            break;
+        } break;
 
         case Mode::CoolingDown:
             renderCooldown(now);

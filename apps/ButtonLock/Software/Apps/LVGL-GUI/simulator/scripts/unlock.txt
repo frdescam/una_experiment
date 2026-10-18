@@ -20,4 +20,9 @@ wait 350
 tap DOWN
 wait 200
 shot 04-unlocked.ppm
+tap UP                      # the old six-press habit: two presses too many...
+wait 250
+tap SELECT
+wait 300
+expect_running              # ...swallowed: the hand-back waits for them to stop
 expect_exit 3000

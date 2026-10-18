@@ -208,8 +208,10 @@ TEST_P(JacketModelTest, TheDefaultLockStaysFarAheadOfIt)
     // averages up to about 21 false unlocks per 1000 h under the harshest
     // model (docs/sequence-study.md): here at most 6 in 200 h, against the
     // hundreds of activities the same noise opens on a stock watch. The bound
-    // leaves room for chance, and a broken rule trips it: without the
-    // cool-down, random taps get 13 through and chaos 42.
+    // leaves room for chance. Removing the cool-down trips it (random taps
+    // 13, chaos 42), as does removing the gap limit (random taps 76); the
+    // quiet, chord and press-length rules have their own tests in
+    // UnlockDetector_test.
     constexpr uint32_t kRides = 200;
     uint32_t unlocks = 0;
     uint32_t opens   = 0;

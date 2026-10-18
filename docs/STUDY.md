@@ -203,12 +203,13 @@ the guide, which moves the amber arc to the next button and shows dots for
 progress. The sequence never has to be remembered. The first version asked for
 six presses (one and a half laps); [`sequence-study.md`](sequence-study.md) shows
 four hold up across all the noise modelled, at about a second less per unlock.
-The rules that keep a sleeve out live in
-`Software/Libs/Core/ButtonLock/UnlockDetector.*`:
+The rules that keep a sleeve out live in `Software/Libs/Core/ButtonLock/`:
+`Sequence.cpp` checks the first when the setting is read, `UnlockDetector.*`
+applies the rest.
 
 | Rule | What it stops |
 |---|---|
-| **At least three different buttons, no repeats** (enforced on any configured sequence) | A cuff pressing one side or rocking across two buttons; one bouncing button |
+| **At least three different buttons, never the same twice in a row** (any configured sequence) | A cuff pressing one side or rocking across two buttons; one bouncing button |
 | **One button at a time**: any chord ends the attempt | Squeezing the case |
 | **Quiet first**: the first step only counts after 0.6 s without input | A burst that happens to start with the right button |
 | **Brisk**: each press under 1.2 s, next step within 2.5 s | Holds, slow random presses |
@@ -282,7 +283,7 @@ is its output. It makes two changes to each app:
 |---|---|---|
 | Unlock rules, lock policy, watchdog, the model itself | 92 GoogleTest cases (`tests/`) | all pass |
 | Cuff noise (§6.2) | Monte Carlo, frame-paced exactly like the LVGL port | about 20 false unlocks per 1,000 h at worst (below) |
-| Sequence length (§6.3) | `seq_study`, plus an independent implementation | four presses chosen |
+| Sequence length (§6.3) | `seq_study`, cross-checked by `seq_crosscheck` (separate code) | four presses chosen |
 | Lock screen, all states | PC simulator (`simulator/scripts/*.txt`) with scripted kernel events and screenshots | 4/4 scripts pass |
 | Service across launches: boot lock, relock after 1 min, manual open, re-assert when hidden | `ButtonLockServiceHarness` on the SDK's mock kernel, real time | 4/4 scenarios pass; timings within 10 ms |
 | Watch builds | Arm GNU Toolchain 13.3.rel1 + the SDK's packer | `.uapp` for ButtonLock, Run, Bike, Hike |
@@ -351,8 +352,8 @@ felt like too many. `tests/seq_study.cpp` measures 146 variants over the same
 models and two more (taps with holds, a cuff rocking across two buttons), at the
 hostile rate and slowed until a stock watch opens about one activity an hour. It
 also counts what the noise does on the watch face in the two minutes before the
-relock, and models a person unlocking with and without gloves. A second,
-independent implementation agrees within about 3 %.
+relock, and models a person unlocking with and without gloves. A second program
+written separately, `tests/seq_crosscheck.cpp`, agrees within a few percent.
 
 - **Three buttons in the right order is not rare for a cuff.** One try matches a
   given order 1 time in 64, but a cuff makes hundreds of tries an hour: with no
@@ -386,16 +387,26 @@ need firmware with kernel **1.4.0 or newer** (SDK ABI 3).
    (UNA's docs use the app name; one third-party guide uses the APP_ID
    `5CBC53B94083EF7D`. If the app does not appear, try that.)
 3. Optional: copy `apps/ButtonLock/Output/app_config.example.json` to the same
-   folder as `app_config.json` and edit it.
+   folder as `app_config.json`, and keep only the keys you change: a key in the
+   file pins its value, even when a later version changes the default.
 4. Eject safely, then power-cycle the watch. It should come up locked about 5 s
    after booting.
 
-**Coming from RideLock 0.1.0.** Delete its folder (or its `.uapp`) first, and
-install ButtonLock as above. Both carry the same app ID, so the phone app should
-treat ButtonLock as the same app; two copies side by side would both put a lock
-up. An `app_config.json` written for RideLock still works, `L1 R1` names
-included, except that a sequence under three presses or on fewer than three
-buttons now falls back to the default.
+**Coming from RideLock 0.1.0.**
+
+1. If you made an `app_config.json` for it, move it into the new
+   `Apps/ButtonLock/` folder: deleting the RideLock folder deletes it. Then
+   remove its `unlockSequence` line. RideLock's example file set it to the old
+   six-press code, `L1 R1 R2 L2 L1 R1`, which is still valid and would keep
+   six presses. Otherwise old files still work, `L1 R1` names included; a
+   sequence under three presses or on fewer than three buttons now falls back
+   to the default.
+2. Delete the RideLock folder, and install ButtonLock as above. Both carry the
+   same app ID, so the phone app should treat ButtonLock as the same app; two
+   copies side by side would both put a lock up.
+3. The new code, UP SELECT BACK DOWN, is the first four presses of the old one.
+   Extra presses straight after it are swallowed: the lock hands the watch back
+   once the buttons have been still for 0.7 s (3 s at most).
 
 **Locking at once.** Open ButtonLock from Utilities: UP from the watch face,
 scroll to it, SELECT. On firmware 1.4.0 the Utilities menu opens on Settings and
